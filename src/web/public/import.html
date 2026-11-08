@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#050f19" />
+  <title>MintPilot EVM Wallet</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body data-page="import">
+<main>
+  <header class="wallet-hero">
+    <img class="wallet-logo" src="/assets/mintpilot-logo.webp" alt="MintPilot" />
+    <span class="private-badge">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-.5V4.5A3.5 3.5 0 0 0 8 1Zm-2 3.5a2 2 0 1 1 4 0V6H6V4.5Z"/></svg>
+      Premium wallet
+    </span>
+    <h1 id="title">Secure EVM wallet</h1>
+    <p class="lead">Create a new wallet, or add one you already have.</p>
+  </header>
+
+  <div class="card reassurance">
+    <strong>Use a burner wallet</strong>
+    <span>MintPilot keeps an encrypted copy of the key so it can sign your scheduled mints automatically. Never add a wallet that holds funds you can't afford to lose.</span>
+  </div>
+
+  <section id="create" class="card panel hidden">
+    <button id="create-button">Create new EVM wallet</button>
+    <p class="muted small">Back up the recovery phrase before leaving this page. It will not be shown again.</p>
+  </section>
+
+  <section id="import-section" class="card panel hidden">
+    <label for="secret"><b>Private key or recovery phrase</b><span class="field-hint">A 64-character EVM private key, or a 12–24 word phrase</span></label>
+    <textarea id="secret" rows="4" autocomplete="off" spellcheck="false" placeholder="Enter here; never send this in Telegram"></textarea>
+    <button id="import-button">Continue securely</button>
+    <p class="muted small">We work out your address on this device first, then you confirm ownership with a free signature.</p>
+  </section>
+
+  <section id="result" class="card panel hidden">
+    <p><strong>Wallet address</strong></p><code id="address"></code>
+    <div id="backup" class="card hidden"><strong>Back up this new wallet now</strong><pre id="backup-text"></pre></div>
+    <button id="sign-button">Confirm ownership</button>
+    <p class="muted small">This signature is free and does not send a transaction.</p>
+  </section>
+
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+</main>
+<script defer src="/assets/wallet-import.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#050f19" />
+  <title>MintPilot Dashboard</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body data-page="dashboard">
+<main>
+  <header class="hero">
+    <div class="hero-copy">
+      <span class="private-badge">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-.5V4.5A3.5 3.5 0 0 0 8 1Zm-2 3.5a2 2 0 1 1 4 0V6H6V4.5Z"/></svg>
+        Private link, view-only
+      </span>
+      <h1>Your activity</h1>
+      <p class="lead">Your wallets, scheduled mints and transaction status.</p>
+      <div id="status" class="status" role="status" aria-live="polite">Loading your dashboard…</div>
+    </div>
+    <img class="hero-logo" src="/assets/mintpilot-logo.webp" alt="MintPilot" />
+  </header>
+
+  <section class="overview-strip" aria-label="Account summary">
+    <article class="overview-stat"><span>Wallets</span><strong id="wallet-count">—</strong></article>
+    <article class="overview-stat"><span>Mint schedules</span><strong id="schedule-count">—</strong></article>
+    <article class="overview-stat"><span>Transactions</span><strong id="transaction-count">—</strong></article>
+  </section>
+
+  <section class="card dashboard-card" aria-labelledby="wallets-title">
+    <div class="section-heading"><div><h2 id="wallets-title">Wallets</h2><p class="section-help">MintPilot signs your scheduled mints from these wallets automatically.</p></div></div>
+    <div id="wallets" class="table-wrap"></div>
+  </section>
+
+  <section class="card dashboard-card" aria-labelledby="schedules-title">
+    <div class="section-heading"><div><h2 id="schedules-title">Mint schedules</h2><p class="section-help">Amounts exclude network fees (gas).</p></div></div>
+    <div id="schedules" class="table-wrap"></div>
+  </section>
+
+  <section class="card dashboard-card" aria-labelledby="transactions-title">
+    <div class="section-heading"><div><h2 id="transactions-title">Transactions</h2><p class="section-help">Mints MintPilot has submitted and is watching for confirmation.</p></div></div>
+    <div id="tracked" class="table-wrap"></div>
+  </section>
+
+  <footer class="dashboard-footer">
+    <span id="expiry">Keep this link private. It expires automatically.</span>
+  </footer>
+</main>
+<script src="/assets/dashboard.js"></script>
+</body>
+</html>
