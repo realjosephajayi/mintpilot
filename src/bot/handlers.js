@@ -14,7 +14,7 @@ const { createDashboardSession } = require('../core/dashboard');
 const { checkMintReadiness } = require('../core/readiness');
 const { runPreflight } = require('../core/preflight');
 const { resolveMintSpec } = require('../core/eligibilityProviders');
-const { getOpenSeaDrop, assertDropMatchesSchedule } = require('../core/openSeaDrops');
+const { getOpenSeaDrop, searchOpenSeaCollections, getOpenSeaCollectionByContract, assertDropMatchesSchedule } = require('../core/openSeaDrops');
 const { assertSpecKeys, buildFromSpec } = require('../core/mintAdapters');
 const { automationBlocker, hasSigningKey } = require('../core/automationPolicy');
 const { ProviderError } = require('../core/errors');
@@ -49,8 +49,8 @@ const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i +=
 // Where "Back" leads from each step of the /schedule wizard. Steps that depend on the chosen mint method return
 // to the method list; the time and wallet steps return to "when should MintPilot mint".
 const BACK_TO = {
-  'sched.contract': 'chain', 'sched.preset': 'contract',
-  'sched.qty': 'preset', 'sched.price': 'preset', 'sched.adapterConfig': 'preset', 'sched.twToken': 'preset', 'sched.seadropFee': 'preset', 'sched.mode': 'preset',
+  'sched.contract': 'chain', 'sched.collectionResults': 'contract', 'sched.preset': 'contract',
+  'sched.qty': 'preset', 'sched.price': 'preset', 'sched.adapterConfig': 'preset', 'sched.osQty': 'contract', 'sched.osPrice': 'osQty', 'sched.twToken': 'preset', 'sched.seadropFee': 'preset', 'sched.mode': 'preset',
   'sched.when': 'mode', 'sched.launchAt': 'mode', 'sched.wallet': 'mode', 'sched.wallet1': 'mode', 'sched.confirm': 'mode'
 };
 /** The contract-inspection summary, shown above the mint-method choices. */
@@ -61,7 +61,7 @@ const inspectionIntro = (disc) => {
   return `<b>Contract inspection</b>\nCollection: <b>${esc(disc.name || 'Unknown')}</b> ${disc.symbol ? `<code>${esc(disc.symbol)}</code>` : ''}\nStandard: ${disc.standards?.erc721 ? 'ERC-721' : disc.standards?.erc1155 ? 'ERC-1155' : 'unconfirmed'}${supply}${proxy}\nVerified ABI: ${disc.verifiedAbi ? 'yes' : 'not available'}\nMint protocol: ${esc(disc.protocol || 'unknown')}\n\n`;
 };
 // Everything chosen after the contract; cleared when the user goes back to the method list.
-const METHOD_FIELDS = ['preset', 'mintSpec', 'quantity', 'priceWei', 'seaDrop', 'thirdwebPhase', 'openSeaDrop', 'adapter', 'triggerMode', 'when', 'launchAt', 'endAt', 'wallets'];
+const METHOD_FIELDS = ['preset', 'mintSpec', 'quantity', 'priceWei', 'seaDrop', 'thirdwebPhase', 'openSeaDrop', 'osSlug', 'osFeeBps', 'osSuggestedPriceWei', 'osCandidates', 'adapter', 'triggerMode', 'when', 'launchAt', 'endAt', 'wallets'];
 /** Wizard keyboard: the step's own buttons, then Back (when there is a previous step) and Cancel. */
 const nav = (state, rows = []) => kb([...rows, [...(BACK_TO[state] ? [{ text: '‹ Back', callback_data: `wz:b:${state}` }] : []), { text: 'Cancel', callback_data: 'wz:x' }]]);
 const timePicks = (withNow, zoneName, zoneButton) => [
@@ -408,6 +408,130 @@ function createBotHandlers(ctx) {
     await wiz(chatId, '<b>Schedule a mint</b>\nWhich network is the NFT on? You can stop any time with Cancel or /cancel.', nav('sched.chain', rows));
   }
 
+  const NATIVE_CURRENCY = '0x0000000000000000000000000000000000000000';
+  function openSeaInput(text) {
+    const raw = String(text || '').trim();
+    const address = raw.match(/0x[a-fA-F0-9]{40}/)?.[0];
+    if (address && (raw === address || /^https?:\/\//i.test(raw))) return { address };
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const url = new URL(raw);
+        if (!['opensea.io', 'www.opensea.io'].includes(url.hostname.toLowerCase())) return null;
+        const parts = url.pathname.split('/').filter(Boolean);
+        const offset = /^[a-z]{2}(?:-[a-z]{2})?$/i.test(parts[0] || '') ? 1 : 0;
+        if (['collection', 'drops'].includes((parts[offset] || '').toLowerCase()) && parts[offset + 1]) {
+          return { slug: parts[offset + 1] };
+        }
+      } catch { return null; }
+      return null;
+    }
+    return { query: raw };
+  }
+
+  async function askContractPrompt(chatId, d) {
+    setState(db, chatId, 'sched.contract', d, now());
+    return wiz(chatId,
+      `<b>Find the collection</b>\nSend its name to search on OpenSea, paste an OpenSea collection link, or enter the NFT contract address on ${esc(chainName(d.chain))}. MintPilot will check the match before you schedule.`,
+      nav('sched.contract')
+    );
+  }
+
+  function openSeaStagePrice(drop) {
+    const stages = [drop.active_stage, drop.next_stage, ...(Array.isArray(drop.stages) ? drop.stages : [])].filter((stage) => {
+      if (!stage) return false;
+      const end = Date.parse(stage.end_time) / 1000;
+      return !Number.isFinite(end) || end > now();
+    });
+    const stage = stages.find((x) => x.stage_type === 'public_sale' && /^\d+$/.test(String(x.price ?? ''))
+      && String(x.price_currency_address || '').toLowerCase() === NATIVE_CURRENCY);
+    return stage ? String(stage.price) : null;
+  }
+
+  async function askOpenSeaQuantity(chatId, d) {
+    setState(db, chatId, 'sched.osQty', d, now());
+    const max = Math.min(cfg.maxMintQuantity, 100);
+    const picks = [1, 2, 3, 5, 10].filter((n) => n <= max);
+    const rows = [picks.map((n) => ({ text: String(n), callback_data: `osq:${n}` }))];
+    return wiz(chatId,
+      `<b>${esc(d.openSeaDrop.collection_name || d.osSlug)}</b> · ${esc(chainName(d.chain))}\nContract: <code>${shortAddr(d.contract)}</code>\n\nHow many NFTs per wallet? Choose a button or type a number (1–${max}).`,
+      nav('sched.osQty', rows)
+    );
+  }
+
+  async function askOpenSeaPriceCap(chatId, d) {
+    setState(db, chatId, 'sched.osPrice', d, now());
+    const rows = d.osSuggestedPriceWei == null ? [] : [[{
+      text: 'Use listed public price', callback_data: 'oscap:public'
+    }]];
+    return wiz(chatId,
+      `<b>Maximum spend per NFT</b>\nEnter a limit in ETH (for example <code>0.05</code>). MintPilot will refuse a transaction above your limit.\n${d.osSuggestedPriceWei == null ? 'No native-ETH public price was available to suggest; check the project’s mint page.' : `OpenSea lists a public price of ${formatWei(BigInt(d.osSuggestedPriceWei))} ETH per NFT when that public stage is active.`}`,
+      nav('sched.osPrice', rows)
+    );
+  }
+
+  async function acceptOpenSeaPriceCap(chatId, d, priceWei) {
+    if (priceWei * BigInt(d.quantity) > parseEth(cfg.maxMintValueEth)) {
+      return warn(chatId, `That maximum totals ${formatWei(priceWei * BigInt(d.quantity))} ETH, above the bot’s safety limit of ${cfg.maxMintValueEth} ETH. Choose a lower limit or quantity.`);
+    }
+    d.preset = 'adapter:opensea-drop';
+    d.priceWei = priceWei.toString();
+    d.mintSpec = { adapter: 'opensea-drop', slug: d.osSlug, quantity: d.quantity, priceWei: d.priceWei, feeBps: d.osFeeBps };
+    return askTriggerMode(chatId, d);
+  }
+
+  async function prepareOpenSeaCollection(chatId, d, slug, expectedContract = null) {
+    if (!openSeaChainFor(d.chain)) return warn(chatId, `OpenSea collection lookup is not available on ${esc(chainName(d.chain))}.`);
+    if (!cfg.openSeaApiKey) return warn(chatId, 'Collection lookup is not enabled on this bot yet. Enter the contract address to use the standard mint setup.');
+    try {
+      const drop = await getOpenSeaDrop(slug, { cfg });
+      const contract = expectedContract || drop.contract_address;
+      assertDropMatchesSchedule(drop, { chain: d.chain, contract }, slug);
+      const pricedStages = [drop.active_stage, drop.next_stage].filter((stage) => stage?.stage_type === 'public_sale'
+        && stage.price_currency_address && String(stage.price_currency_address).toLowerCase() !== NATIVE_CURRENCY);
+      if (pricedStages.length) return warn(chatId, 'This collection’s current or next public sale uses a token other than ETH. MintPilot’s current maximum-spend setting is ETH-based, so this OpenSea route is not available for that stage.');
+      if (!(await rpc.hasCode(d.chain, contract))) return warn(chatId, 'OpenSea returned a collection without a deployed contract on this network. Check the collection or choose another result.');
+      d.contract = contract;
+      d.osSlug = drop.collection_slug;
+      d.osFeeBps = drop.fee_bps;
+      d.osSuggestedPriceWei = openSeaStagePrice(drop);
+      d.preset = 'adapter:opensea-drop';
+      d.openSeaDrop = {
+        collection_name: drop.collection_name,
+        collection_slug: drop.collection_slug,
+        chain: drop.chain,
+        drop_type: drop.drop_type,
+        is_minting: drop.is_minting,
+        active_stage: drop.active_stage,
+        next_stage: drop.next_stage
+      };
+      return askOpenSeaQuantity(chatId, d);
+    } catch (e) {
+      return warn(chatId, adapterErrorText(e));
+    }
+  }
+
+  async function resolveOpenSeaInput(chatId, from, d, input) {
+    if (!input || (!input.slug && !input.address && !input.query)) return warn(chatId, 'Send a collection name, an OpenSea collection link, or a contract address.');
+    if (input.slug) return prepareOpenSeaCollection(chatId, d, input.slug, d.contract || null);
+    if (input.address) {
+      if (!openSeaChainFor(d.chain)) return warn(chatId, `OpenSea lookup is not available on ${esc(chainName(d.chain))}.`);
+      try {
+        const match = await getOpenSeaCollectionByContract(input.address, { chain: d.chain, cfg });
+        return prepareOpenSeaCollection(chatId, d, match.slug, input.address);
+      } catch (e) { return warn(chatId, adapterErrorText(e)); }
+    }
+    if (input.query.length < 2 || input.query.length > 100) return warn(chatId, 'Search with at least 2 characters (maximum 100).');
+    if (!cfg.openSeaApiKey) return warn(chatId, 'Collection search is not enabled on this bot yet. You can still enter the NFT contract address to use the standard mint setup.');
+    try {
+      const results = await searchOpenSeaCollections(input.query, { chain: d.chain, limit: 8, cfg });
+      if (!results.length) return warn(chatId, `No collections found for “${esc(input.query)}” on ${esc(chainName(d.chain))}. Check the spelling, or choose “I have a contract address”.`);
+      d.osCandidates = results;
+      setState(db, from.id, 'sched.collectionResults', d, now());
+      const rows = results.map((result, index) => [{ text: `${result.name.slice(0, 39)} · ${result.slug.slice(0, 18)}`, callback_data: `osr:${index}` }]);
+      return wiz(chatId, `<b>Choose your collection</b>\nSearch results for “${esc(input.query)}” on ${esc(chainName(d.chain))}. Check the name before continuing; MintPilot verifies each selected contract.`, nav('sched.collectionResults', rows));
+    } catch (e) { return warn(chatId, adapterErrorText(e)); }
+  }
+
   async function askPreset(chatId) {
     const st = getState(db, chatId);
     const discovery = st?.data?.discovery;
@@ -472,6 +596,10 @@ function createBotHandlers(ctx) {
   }
 
   async function askAdapterConfig(chatId, adapter) {
+    if (adapter === 'opensea-drop') {
+      const state = getState(db, chatId);
+      return resolveOpenSeaInput(chatId, { id: chatId }, state.data, { address: state.data.contract });
+    }
     const examples = {
       merkle: '{"signatureFunction":"mint(uint256,bytes32[])","quantity":1,"priceWei":"0","proof":["0x..."]}  — or "providerId":"<operator provider>" instead of "proof"',
       signature: '{"mintFunction":"mint(address,uint256,uint256,uint256,uint256,bytes)","quantity":1,"maxQuantity":1,"nonce":0,"deadline":1790000000,"signature":"0x...","priceWei":"0"}  — or "providerId":"<operator provider>" instead of the signature fields',
@@ -634,10 +762,10 @@ function createBotHandlers(ctx) {
   async function wizardBack(chatId, from, st) {
     const d = st.data; const target = BACK_TO[st.state];
     if (target === 'chain') return startSchedule(chatId, from);
+    if (target === 'osQty') return askOpenSeaQuantity(chatId, d);
     if (target === 'contract') {
       delete d.contract; delete d.discovery;
-      setState(db, from.id, 'sched.contract', d, now());
-      return wiz(chatId, `Send the <b>NFT contract address</b> on ${esc(chainName(d.chain))}:`, nav('sched.contract'));
+      return askContractPrompt(chatId, d);
     }
     if (target === 'preset') {
       for (const k of METHOD_FIELDS) delete d[k];
@@ -652,12 +780,39 @@ function createBotHandlers(ctx) {
     const d = st.data;
     try {
       switch (st.state) {
+        case 'sched.osQty': {
+          const max = Math.min(cfg.maxMintQuantity, 100);
+          const quantity = Number(text.trim());
+          if (!Number.isInteger(quantity) || quantity < 1 || quantity > max) return warn(chatId, `Choose a whole number from 1 to ${max}.`);
+          d.quantity = quantity;
+          return askOpenSeaPriceCap(chatId, d);
+        }
+        case 'sched.osPrice': {
+          const priceWei = parseEth(text.trim().replace(/\s*eth$/i, ''));
+          return acceptOpenSeaPriceCap(chatId, d, priceWei);
+        }
         case 'sched.seadropFee': {
           const recipient = normalizeAddress(text);
           if (d.seaDrop.publicDrop.restrictFeeRecipients && !d.seaDrop.allowedFeeRecipients.some((x) => x.toLowerCase() === recipient.toLowerCase())) return warn(chatId, 'That fee recipient is not in the SeaDrop allowlist. Choose one of the buttons or verify the address.');
           d.mintSpec.feeRecipient = recipient;
           setState(db, from.id, 'sched.qty', d, now());
           return wiz(chatId, `Public price: <b>${formatWei(BigInt(d.mintSpec.mintPrice))} ETH</b>\nWallet limit: <b>${d.seaDrop.publicDrop.maxTotalMintableByWallet}</b>\nEnter quantity (1–${cfg.maxMintQuantity}):`, nav('sched.qty'));
+        }
+        case 'sched.contract': {
+          const raw = text.trim();
+          const address = raw.match(/0x[a-fA-F0-9]{40}/)?.[0];
+          if (!address) return resolveOpenSeaInput(chatId, from, d, openSeaInput(text));
+          let addr;
+          try { addr = normalizeAddress(address); } catch (e) { return warn(chatId, esc(e.message)); }
+          let has;
+          try { has = await rpc.hasCode(d.chain, addr); } catch { return warn(chatId, 'Could not reach that network right now. Try again in a moment.'); }
+          if (!has) return warn(chatId, `No contract code at that address on ${esc(chainName(d.chain))}. Check the network and address.`);
+          try {
+            d.discovery = rpc.discover ? await rpc.discover(d.chain, addr) : null;
+          } catch { d.discovery = null; }
+          if (d.discovery && d.discovery.nft === false) return warn(chatId, 'That address does not identify itself as an ERC-721 or ERC-1155 NFT contract. Verify the collection address before continuing.');
+          d.contract = addr; setState(db, from.id, 'sched.preset', d, now());
+          return askPreset(chatId);
         }
         case 'sched.adapterConfig': {
           let spec;
@@ -708,18 +863,6 @@ function createBotHandlers(ctx) {
             }
             return askTriggerMode(chatId, d);
           } catch (e) { return warn(chatId, adapterErrorText(e)); }
-        }
-        case 'sched.contract': {
-          const addr = normalizeAddress(text);
-          let has;
-          try { has = await rpc.hasCode(d.chain, addr); } catch { return warn(chatId, 'Could not reach that network right now. Try again in a moment.'); }
-          if (!has) return warn(chatId, `No contract code at that address on ${esc(chainName(d.chain))}. Check the network and address.`);
-          try {
-            d.discovery = rpc.discover ? await rpc.discover(d.chain, addr) : null;
-          } catch { d.discovery = null; }
-          if (d.discovery && d.discovery.nft === false) return warn(chatId, 'That address does not identify itself as an ERC-721 or ERC-1155 NFT contract. Verify the collection address before continuing.');
-          d.contract = addr; setState(db, from.id, 'sched.preset', d, now());
-          return askPreset(chatId);
         }
         case 'sched.twToken': {
           const raw = text.trim();
@@ -820,11 +963,27 @@ function createBotHandlers(ctx) {
       }
       return askWhen(chatId, from, d);
     }
+    if (st.state === 'sched.collectionResults' && data.startsWith('osr:')) {
+      const index = Number(data.slice(4));
+      const result = d.osCandidates?.[index];
+      if (!Number.isInteger(index) || !result) return warn(chatId, 'Those search results expired. Search for the collection again.');
+      return prepareOpenSeaCollection(chatId, d, result.slug, d.contract || null);
+    }
+    if (st.state === 'sched.osQty' && data.startsWith('osq:')) {
+      const quantity = Number(data.slice(4));
+      const max = Math.min(cfg.maxMintQuantity, 100);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > max) return;
+      d.quantity = quantity;
+      return askOpenSeaPriceCap(chatId, d);
+    }
+    if (st.state === 'sched.osPrice' && data === 'oscap:public' && /^\d+$/.test(String(d.osSuggestedPriceWei ?? ''))) {
+      return acceptOpenSeaPriceCap(chatId, d, BigInt(d.osSuggestedPriceWei));
+    }
     if (st.state === 'sched.chain' && data.startsWith('c:')) {
       const key = data.slice(2);
       if (!chains[key]) return;
-      d.chain = key; setState(db, from.id, 'sched.contract', d, now());
-      return wiz(chatId, `Send the <b>NFT contract address</b> on ${esc(chainName(key))}:`, nav('sched.contract'));
+      d.chain = key;
+      return askContractPrompt(chatId, d);
     }
     if (st.state === 'sched.preset' && data === 'tw1155') {
       setState(db, from.id, 'sched.twToken', d, now());

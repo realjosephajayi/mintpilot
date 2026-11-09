@@ -131,6 +131,46 @@ async function getOpenSeaDrop(slug, options = {}) {
   return drop;
 }
 
+/** Search OpenSea collections on one selected network; only collection results are returned. */
+async function searchOpenSeaCollections(query, { chain, limit = 8, ...options } = {}) {
+  const text = String(query || '').trim();
+  if (text.length < 2 || text.length > 100) throw new MintSpecError('Search with 2 to 100 characters.');
+  const openSeaChain = openSeaChainFor(chain);
+  if (!openSeaChain) throw new MintSpecError(`OpenSea collection search is not available on ${chain}.`);
+  const count = Math.max(1, Math.min(20, Number(limit) || 8));
+  const params = new URLSearchParams({ query: text, chains: openSeaChain, asset_types: 'collection', limit: String(count) });
+  const payload = await requestJson(`/search?${params.toString()}`, options);
+  if (!Array.isArray(payload.results)) throw new OpenSeaApiError('OpenSea search returned an invalid response.', { retryable: true });
+  return payload.results
+    .filter((item) => item?.type === 'collection' && item.collection && SLUG_RE.test(item.collection.collection))
+    .map((item) => ({
+      slug: item.collection.collection,
+      name: String(item.collection.name || item.collection.collection).slice(0, 120),
+      disabled: Boolean(item.collection.is_disabled),
+      url: typeof item.collection.opensea_url === 'string' ? item.collection.opensea_url : null
+    }))
+    .filter((item) => !item.disabled)
+    .slice(0, count);
+}
+
+/** Resolve a contract address to its OpenSea collection slug on the selected chain. */
+async function getOpenSeaCollectionByContract(address, { chain, ...options } = {}) {
+  if (!isAddress(address)) throw new MintSpecError('Enter a valid NFT contract address.');
+  const openSeaChain = openSeaChainFor(chain);
+  if (!openSeaChain) throw new MintSpecError(`OpenSea collection lookup is not available on ${chain}.`);
+  const result = await requestJson(`/chain/${encodeURIComponent(openSeaChain)}/contract/${encodeURIComponent(address)}`, options);
+  if (typeof result.collection !== 'string' || !SLUG_RE.test(result.collection)) {
+    throw new OpenSeaApiError('OpenSea could not match that contract to a collection.', { retryable: false });
+  }
+  if (result.chain && String(result.chain).toLowerCase() !== openSeaChain.toLowerCase()) {
+    throw new OpenSeaApiError('OpenSea returned a contract on a different network.', { retryable: false });
+  }
+  if (result.address && String(result.address).toLowerCase() !== String(address).toLowerCase()) {
+    throw new OpenSeaApiError('OpenSea returned a different contract address.', { retryable: false });
+  }
+  return { slug: result.collection, name: String(result.name || result.collection).slice(0, 120) };
+}
+
 function assertDropMatchesSchedule(drop, schedule, expectedSlug = null) {
   if (drop.drop_type !== 'seadrop_v1_erc721') throw new MintSpecError('OpenSea REST mint routing supports ERC-721 SeaDrop V1 drops only.');
   const requestedSlug = expectedSlug || schedule.expectedOpenSeaSlug || schedule.mintSpec?.slug || null;
@@ -150,4 +190,4 @@ async function buildOpenSeaMintTransaction(slug, { cfg, fetchImpl, minter, quant
   return requestJson(`/drops/${encodeURIComponent(safeSlug)}/mint`, { cfg, fetchImpl, method: 'POST', body: { minter, quantity: n } });
 }
 
-module.exports = { API_BASE, OpenSeaApiError, validateSlug, getOpenSeaDrop, assertDropMatchesSchedule, buildOpenSeaMintTransaction, requestJson, retryAfterSeconds };
+module.exports = { API_BASE, OpenSeaApiError, validateSlug, getOpenSeaDrop, searchOpenSeaCollections, getOpenSeaCollectionByContract, assertDropMatchesSchedule, buildOpenSeaMintTransaction, requestJson, retryAfterSeconds };

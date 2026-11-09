@@ -99,7 +99,7 @@ test('wizard: only networks MintPilot may auto-sign on are offered; rejects non-
   await b.msg(1, '/schedule');
   assert.deepEqual(b.tg.last().args[2].reply_markup.inline_keyboard.flat().map((x) => x.text), ['Base', 'Robinhood Chain', 'Cancel']);
   await b.cb(1, 'c:robinhood');
-  await b.msg(1, 'not-an-address'); assert.match(b.tg.last().args[1], /valid EVM address/);
+  await b.msg(1, 'not-an-address'); assert.match(b.tg.last().args[1], /Collection search is not enabled/);
   await b.msg(1, A(6)); assert.match(b.tg.last().args[1], /No contract code/);
   await b.msg(1, A(5)); await b.cb(1, 'p:1');
   await b.msg(1, '99'); assert.match(b.tg.last().args[1], /whole number/);
@@ -134,6 +134,68 @@ test('adapter JSON: file/URL sources and unknown fields are rejected without tou
   assert.match(b.tg.last().args[1], /Unsupported field.*proofUrl/);
   await b.msg(1, JSON.stringify({ signatureFunction: 'mint(uint256,bytes32[])', quantity: 1, priceWei: '0', providerId: 'nope' }));
   assert.match(b.tg.last().args[1], /provider "nope" is not configured/);
+});
+
+test('friendly OpenSea flow searches a collection name, offers quantity buttons, accepts an ETH cap, and schedules only after confirmation', async () => {
+  const realFetch = globalThis.fetch;
+  const contract = A(5);
+  const drop = {
+    collection_slug: 'example-drop', collection_name: 'Example Collection', chain: 'base',
+    contract_address: contract, drop_type: 'seadrop_v1_erc721', fee_bps: 1000, is_minting: true,
+    active_stage: {
+      stage_type: 'public_sale', price: '10000000000000000',
+      price_currency_address: '0x0000000000000000000000000000000000000000',
+      start_time: new Date(T0 * 1000).toISOString(), end_time: new Date((T0 + 3600) * 1000).toISOString()
+    }
+  };
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v2/search') return new Response(JSON.stringify({ results: [
+      { type: 'collection', collection: { collection: 'example-drop', name: 'Example Collection', is_disabled: false } }
+    ] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (parsed.pathname === '/api/v2/drops/example-drop') return new Response(JSON.stringify(drop), { status: 200, headers: { 'content-type': 'application/json' } });
+    throw new Error(`Unexpected OpenSea URL: ${url}`);
+  };
+  try {
+    const b = boot(); b.cfg.openSeaApiKey = 'friendly-flow-test-key'; await b.msg(1, '/start');
+    await b.msg(1, '/schedule'); await b.cb(1, 'c:base');
+    assert.match(b.tg.last().args[1], /Send its name to search on OpenSea/);
+    await b.msg(1, 'Example Collection');
+    assert.match(b.tg.last().args[1], /Choose your collection/);
+    await b.cb(1, 'osr:0');
+    assert.match(b.tg.last().args[1], /Example Collection/);
+    assert.ok(buttons(b.tg.last()).some((x) => x.callback_data === 'osq:2'));
+    await b.cb(1, 'osq:2');
+    assert.match(b.tg.last().args[1], /Maximum spend per NFT/);
+    assert.ok(buttons(b.tg.last()).some((x) => x.callback_data === 'oscap:public'));
+    await b.cb(1, 'oscap:public'); await b.cb(1, 'mode:manual'); await b.msg(1, '+2h');
+    assert.match(b.tg.last().args[1], /Confirm schedule/);
+    assert.match(b.tg.last().args[1], /0\.02 ETH/);
+    assert.equal(b.db.prepare('SELECT COUNT(*) n FROM schedules').get().n, 0, 'a search never creates a schedule before confirmation');
+    await b.cb(1, 'ok');
+    const row = b.db.prepare('SELECT * FROM schedules').get();
+    assert.equal(row.contract, contract); assert.equal(row.quantity, 2);
+    assert.equal(row.total_wei, '20000000000000000');
+    assert.deepEqual(Object.keys(JSON.parse(row.mint_spec)).sort(), ['adapter', 'feeBps', 'priceWei', 'quantity', 'slug']);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('friendly OpenSea flow refuses a known non-ETH public stage instead of presenting an ETH spend cap', async () => {
+  const realFetch = globalThis.fetch;
+  const contract = A(5);
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    collection_slug: 'token-priced-drop', collection_name: 'Token Priced Drop', chain: 'base',
+    contract_address: contract, drop_type: 'seadrop_v1_erc721', fee_bps: 1000, is_minting: true,
+    active_stage: { stage_type: 'public_sale', price: '1000', price_currency_address: A(8) }
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const b = boot(); b.cfg.openSeaApiKey = 'non-eth-stage-test-key'; await b.msg(1, '/start');
+    await b.msg(1, '/schedule'); await b.cb(1, 'c:base');
+    await b.msg(1, 'https://opensea.io/collection/token-priced-drop');
+    assert.match(b.tg.last().args[1], /uses a token other than ETH/);
+    assert.notEqual(convo(b).state, 'sched.osQty');
+    assert.equal(b.db.prepare('SELECT COUNT(*) n FROM schedules').get().n, 0);
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('an inline Merkle proof is scheduled for exactly one chosen wallet', async () => {

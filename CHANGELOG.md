@@ -1,6 +1,23 @@
 # Changelog
 Format: [Keep a Changelog](https://keepachangelog.com/). Review finding numbers refer to `docs/REVIEW.md`.
 
+## [2.3.1] — 2026-11-09
+
+### Added
+- Friendly collection discovery after network selection: users can search by collection name, paste an
+  OpenSea collection URL, or enter an NFT contract address. Search results are limited to the selected
+  network and the chosen contract/drop is verified before scheduling.
+- OpenSea quantity quick-picks and an ETH-denominated maximum spend prompt, with an optional listed public
+  price suggestion. JSON and wei are kept out of the OpenSea user flow; the existing review and confirmation
+  remain required before a schedule is saved.
+- Known current/next public stages priced in non-ETH tokens are refused rather than incorrectly applying an
+  ETH spend ceiling to them.
+- OpenSea API client support for documented collection search and contract-to-collection lookup endpoints.
+
+### Changed
+- The `/schedule` collection prompt accepts either plain-language collection names, supported OpenSea links,
+  or contract addresses. Direct contract entry still opens MintPilot's existing supported-method flow.
+
 ## [2.3.0] — 2026-11-05
 Mainnet-only, ten chains, built to serve many users at once. ADR-0006. Upgrade notes: `docs/RUNBOOK.md` →
 *Upgrading from v2.2*. Not built yet (with the plan and adapter structure): `docs/HANDOFF.md`.

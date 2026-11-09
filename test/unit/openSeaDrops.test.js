@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getOpenSeaDrop, assertDropMatchesSchedule, buildOpenSeaMintTransaction, validateSlug, requestJson } = require('../../src/core/openSeaDrops');
+const { getOpenSeaDrop, searchOpenSeaCollections, getOpenSeaCollectionByContract, assertDropMatchesSchedule, buildOpenSeaMintTransaction, validateSlug, requestJson } = require('../../src/core/openSeaDrops');
 
 const contract = '0x1111111111111111111111111111111111111111';
 const drop = { collection_slug: 'example-drop', chain: 'base', contract_address: contract, drop_type: 'seadrop_v1_erc721', fee_bps: 1000, is_minting: true };
@@ -23,6 +23,46 @@ test('OpenSea REST drop lookup sends server API key and validates the returned S
   assert.equal(call.options.headers['x-api-key'], 'secret-server-key');
   assert.equal(call.options.headers.authorization, undefined);
   assert.equal(call.options.method, 'GET');
+});
+
+test('collection-name search is limited to the selected chain and returns collection results only', async () => {
+  let call;
+  const result = await searchOpenSeaCollections('Example Collection', {
+    chain: 'base', limit: 2, cfg: { openSeaApiKey: 'search-test-key' },
+    fetchImpl: async (url, options) => {
+      call = { url: new URL(url), options };
+      return response(200, { results: [
+        { type: 'collection', collection: { collection: 'example-drop', name: 'Example Collection', is_disabled: false, opensea_url: 'https://opensea.io/collection/example-drop' } },
+        { type: 'account', account: { username: 'not-a-collection' } },
+        { type: 'collection', collection: { collection: 'disabled-drop', name: 'Disabled', is_disabled: true } }
+      ] });
+    }
+  });
+  assert.deepEqual(result, [{ slug: 'example-drop', name: 'Example Collection', disabled: false, url: 'https://opensea.io/collection/example-drop' }]);
+  assert.equal(call.url.pathname, '/api/v2/search');
+  assert.equal(call.url.searchParams.get('query'), 'Example Collection');
+  assert.equal(call.url.searchParams.get('chains'), 'base');
+  assert.equal(call.url.searchParams.get('asset_types'), 'collection');
+  assert.equal(call.url.searchParams.get('limit'), '2');
+  assert.equal(call.options.headers['x-api-key'], 'search-test-key');
+});
+
+test('contract lookup uses the selected OpenSea chain and returns a checked collection slug', async () => {
+  let call;
+  const result = await getOpenSeaCollectionByContract(contract, {
+    chain: 'base', cfg: { openSeaApiKey: 'contract-lookup-test-key' },
+    fetchImpl: async (url, options) => {
+      call = { url: new URL(url), options };
+      return response(200, { address: contract, chain: 'base', collection: 'example-drop', name: 'Example Collection' });
+    }
+  });
+  assert.deepEqual(result, { slug: 'example-drop', name: 'Example Collection' });
+  assert.equal(call.url.pathname, `/api/v2/chain/base/contract/${contract}`);
+  assert.equal(call.options.headers['x-api-key'], 'contract-lookup-test-key');
+  await assert.rejects(() => getOpenSeaCollectionByContract(contract, {
+    chain: 'base', cfg: { openSeaApiKey: 'contract-mismatch-test-key' },
+    fetchImpl: async () => response(200, { address: contract, chain: 'ethereum', collection: 'example-drop', name: 'Example Collection' })
+  }), /different network/);
 });
 
 test('metadata setup binds requested slug, contract, chain, and ERC-721 SeaDrop V1 type', () => {

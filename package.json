@@ -1,6 +1,6 @@
 {
   "name": "mintpilot",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "description": "Telegram bot that schedules and automatically signs NFT mints from encrypted custodial wallets on Ethereum, Base, Ink, Robinhood Chain, Arbitrum One, OP Mainnet, Zora, Shape, Unichain and Soneium",
   "main": "src/index.js",

@@ -206,6 +206,14 @@ Every user gets a **platform wallet** at `/start`. Premium users can create or i
 wallets on the HTTPS `/import` page; the key is encrypted at rest. A wallet without a signing key cannot be
 scheduled.
 
+### Simple collection setup
+After choosing a network, send a collection name, an OpenSea collection link, or an NFT contract address.
+Name searches show a short list of matching collections; choose the correct one and MintPilot verifies its
+network, contract and supported drop type. The OpenSea flow offers quantity buttons, shows a listed public
+price when available, accepts a maximum price in ETH, and then uses the existing timing, wallet, review and
+confirmation steps. Collection-name and OpenSea-link lookup require `OPENSEA_API_KEY`; contract-address
+entry continues to support the other contract adapters without collection search.
+
 ## Mint methods
 * **Presets** — `mint()`, `mint(quantity)`, `publicMint(quantity)` (filtered by the verified ABI when one is
   available).
@@ -223,8 +231,9 @@ scheduled.
   (they need a proof provider / token approvals). If the creator changes the price, the contract rejects the
   claim and the schedule stops; MintPilot never pays a different price.
 
-The adapter JSON accepts **only** the fields each adapter documents (unknown fields are rejected). File
-paths and URLs are never accepted from users.
+The advanced adapter JSON accepts **only** the fields each adapter documents (unknown fields are rejected).
+The OpenSea route does not ask users for JSON or wei values. File paths and arbitrary URLs are never fetched
+from user input.
 
 ### Eligibility providers
 Configure `ELIGIBILITY_PROVIDERS_JSON` (see `.env.example`). Each provider has a `kind`
@@ -235,11 +244,14 @@ are refused, responses are capped at 64 KB, and only a generic status reaches us
 "try later" and 4xx for "not eligible".
 
 ### OpenSea REST SeaDrop V1 mint builder
-Set `OPENSEA_API_KEY` on the server. The wizard validates the collection with `GET /api/v2/drops/{slug}` and
+Set `OPENSEA_API_KEY` on the server. The wizard searches names with OpenSea's `/api/v2/search` endpoint and
+resolves a contract address with `/api/v2/chain/{chain}/contract/{address}`; it validates the selected drop
+with `GET /api/v2/drops/{slug}` and
 the executor requests a fresh transaction from `POST /api/v2/drops/{slug}/mint` immediately before
 simulation. The response chain must match the network's OpenSea identifier (column above; unmapped chains
 are refused), the calldata must be a recognized SeaDrop V1 mint bound to the NFT, wallet and quantity, the
-value must not exceed your ceiling, and the router must be in the NFT's allowed-SeaDrop list.
+value must not exceed your ceiling, and the router must be in the NFT's allowed-SeaDrop list. A known
+current/next public stage priced in a non-ETH token is refused because this route's spend ceiling is ETH-based.
 
 Errors are handled by OpenSea's stable `code`: `NOT_MINTING` waits (with backoff), `INSUFFICIENT_BALANCE`
 waits with a top-up message, `MINTER_NOT_ELIGIBLE`/`MINT_LIMIT_EXCEEDED`/`SUPPLY_EXHAUSTED`/
