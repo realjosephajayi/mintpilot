@@ -8,6 +8,7 @@ const { createLinkSession, getValidSession, consumeSession } = require('../../sr
 const { removeWallet, normalizeAddress, WalletError } = require('../../src/core/wallets');
 const { createSchedule, createSchedules, cancelSchedule, claimReminder, completeReminder, ScheduleError, getSchedule, expireStale, deferSchedule, failSchedule, scheduleDeadline } = require('../../src/core/schedules');
 const { addTrackedTx, TrackError } = require('../../src/core/tracking');
+const { limitsFor } = require('../../src/core/plans');
 const { validatePreCheckout, recordPayment, payloadFor } = require('../../src/core/payments');
 
 const cfg = makeCfg();
@@ -149,6 +150,16 @@ test('multi-wallet schedule creation is atomic', () => {
 test('premium users get higher schedule limits', () => {
   const db = makeDb(); addUser(db, 1, { premium: true }); addWallet(db, cfg, 1, A(1));
   for (let i = 0; i < 10; i++) createSchedule(db, cfg, chains, sched(1), T0);
+});
+
+test('configured admins have unlimited Premium quotas without an expiry', () => {
+  const db = makeDb(); addUser(db, 999); addWallet(db, cfg, 999, A(1));
+  assert.deepEqual(limitsFor(cfg, db, 999, T0), {
+    plan: 'admin', activeSchedules: Infinity, wallets: Infinity, pendingTxs: Infinity, preReminders: true
+  });
+  for (let i = 2; i <= 7; i++) addWallet(db, cfg, 999, A(i));
+  for (let i = 0; i < 35; i++) createSchedule(db, cfg, chains, sched(999), T0);
+  for (let i = 1; i <= 60; i++) addTrackedTx(db, cfg, { telegramId: 999, chain: 'base', txHash: '0x' + String(i).padStart(64, '0') }, T0);
 });
 
 test('reminders remain retryable until completed, then are idempotent', () => {
