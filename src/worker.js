@@ -143,6 +143,7 @@ function createWorker({
         const backoff = result.outcome === OUTCOME.RETRY || result.apiCost;
         const nextAttemptAt = backoff ? t + backoffSec(s.attempts, result.retryAfterSec) : Math.max(t, Number(result.retryAt) || 0);
         deferSchedule(db, s.id, { nextAttemptAt, lastError: result.userReason || null, attempts: backoff ? 'increment' : 'reset' });
+        if (result.inactive) notifyOnce(s, 'inactive', `⏳ ${label(s)}: OpenSea says this mint is not open yet, so nothing was sent.\nMintPilot keeps checking and goes ahead as soon as it opens, until ${utc(scheduleDeadline(s, maxWaitSec))}. If it sells out first, I will tell you.\nIf you set this time earlier than the real mint time, cancel it in /mints and schedule again for the real opening time.`, t);
         if (result.notify === 'funds') notifyOnce(s, 'funds', `💸 ${label(s)}: ${reason}\nWallet: <code>${s.wallet_address}</code> on ${esc(chain ? chain.name : s.chain)}. MintPilot keeps trying until ${utc(scheduleDeadline(s, maxWaitSec))}.`, t);
         return;
       }

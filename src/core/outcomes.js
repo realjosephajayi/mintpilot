@@ -78,10 +78,10 @@ function revertLabel(data, fallback) {
     MintQuantityExceedsMaxSupply: 'the collection is sold out for this quantity',
     MintQuantityExceedsMaxTokenSupplyForStage: 'the stage supply is exhausted for this quantity',
     IncorrectPayment: 'the payment amount is wrong for this stage',
-    InvalidProof: 'the allowlist proof is invalid for this wallet',
+    InvalidProof: 'this wallet is not on the allowlist (its allowlist proof is invalid)',
     InvalidSignature: 'the mint signature is invalid',
     FeeRecipientNotAllowed: 'the fee recipient is not allowed by this drop',
-    PayerNotAllowed: 'this wallet is not an allowed payer',
+    PayerNotAllowed: 'this wallet is not on the allowed list for this drop',
     TokenGatedNotTokenOwner: 'the wallet does not own the required gate token',
     TokenGatedTokenIdAlreadyRedeemed: 'the gate token was already redeemed',
     MintQuantityCannotBeZero: 'the mint quantity is zero'
@@ -99,6 +99,10 @@ function classifyPreparationError(e) {
     if (code === 'NOT_MINTING' || (!code && e.status === 409)) return { outcome: OUTCOME.WAIT, apiCost: true, userReason: 'OpenSea reports the drop is not minting yet.', retryAfterSec: e.retryAfterSec };
     if (code === 'INSUFFICIENT_BALANCE') return { outcome: OUTCOME.WAIT, apiCost: true, notify: 'funds', userReason: 'OpenSea reports the wallet cannot pay the price plus gas. Top up the wallet before the stage ends.' };
     if (e.retryable) return { outcome: OUTCOME.RETRY, userReason: 'OpenSea is rate limiting or temporarily unavailable.', retryAfterSec: e.retryAfterSec };
+    // Say plainly why the wallet was refused instead of echoing the raw API text.
+    if (code === 'MINTER_NOT_ELIGIBLE' || (e.status === 422 && /allow ?list|not eligible|not on the/i.test(String(e.message)))) return { outcome: OUTCOME.TERMINAL, ineligible: true, userReason: 'This wallet is not on the allowlist (eligible list) for this mint stage, so it cannot mint. Nothing was sent. Use a wallet that is on the list, or check the stage requirements on the project page.' };
+    if (code === 'MINT_LIMIT_EXCEEDED') return { outcome: OUTCOME.TERMINAL, userReason: 'This wallet has already reached the per-wallet mint limit for this stage. Nothing was sent.' };
+    if (code === 'SUPPLY_EXHAUSTED') return { outcome: OUTCOME.TERMINAL, userReason: 'This collection or stage is minted out. Nothing was sent.' };
     if (OPENSEA_TERMINAL.has(code) || (e.status >= 400 && e.status < 500)) return { outcome: OUTCOME.TERMINAL, userReason: e.message };
     return { outcome: OUTCOME.RETRY, userReason: 'OpenSea request failed; retrying.', retryAfterSec: e.retryAfterSec };
   }

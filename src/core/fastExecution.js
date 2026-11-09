@@ -21,6 +21,7 @@ const { feeFields, txFeeFields } = require('./feePolicy');
 const { fireAtMs, clockLagMs } = require('./launchTiming');
 const { automationBlocker, hasSigningKey } = require('./automationPolicy');
 const { formatWei } = require('../util/format');
+const { readMintedOut } = require('./supply');
 const { OPEN_ATTEMPT_STATUSES } = require('../db');
 
 const NONCE_CONSUMED_CONFIRM_SEC = 60;
@@ -281,7 +282,14 @@ function createFastExecution({
     try { built = await resolve(schedule, { rpc, cfg, now: nowSec(), checkRouter: false }); }
     catch (e) {
       log.warn?.('mint preparation failed', { scheduleId: schedule.id, error: e?.message });
-      return classifyPreparationError(e);
+      const classified = classifyPreparationError(e);
+      // OpenSea says the drop is not minting: tell "sold out" apart from "not open yet" instead of waiting silently.
+      if (e?.name === 'OpenSeaApiError' && classified.outcome === OUTCOME.WAIT && classified.apiCost && classified.notify !== 'funds') {
+        const out = await readMintedOut(rpc, schedule.chain, schedule.contract);
+        if (out) return result(OUTCOME.TERMINAL, `This collection is minted out (${out.minted} / ${out.max}). There is nothing left to mint, so MintPilot stopped this schedule.`);
+        return { ...classified, inactive: true };
+      }
+      return classified;
     }
     const { spec, tx } = built;
     const view = interpret(schedule, await readState(schedule, spec, tx), { chainTime });

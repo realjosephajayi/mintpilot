@@ -14,11 +14,12 @@ const { createDashboardSession } = require('../core/dashboard');
 const { checkMintReadiness } = require('../core/readiness');
 const { runPreflight } = require('../core/preflight');
 const { resolveMintSpec } = require('../core/eligibilityProviders');
-const { getOpenSeaDrop, searchOpenSeaCollections, getOpenSeaCollectionByContract, assertDropMatchesSchedule } = require('../core/openSeaDrops');
+const { getOpenSeaDrop, searchOpenSeaCollections, getOpenSeaCollectionByContract, assertDropMatchesSchedule, buildOpenSeaMintTransaction } = require('../core/openSeaDrops');
 const { assertSpecKeys, buildFromSpec } = require('../core/mintAdapters');
 const { automationBlocker, hasSigningKey } = require('../core/automationPolicy');
 const { ProviderError } = require('../core/errors');
 const { txUrl, openSeaChainFor } = require('../chains');
+const { isMintedOut, readMintedOut, mintedOutText } = require('../core/supply');
 const { UserError, esc, shortAddr, parseEth, formatWei, parseWhen, utc, looksLikeSecret } = require('../util/format');
 const { gasCap } = require('../core/gasPolicy');
 const { feeFields } = require('../core/feePolicy');
@@ -491,6 +492,8 @@ function createBotHandlers(ctx) {
         && stage.price_currency_address && String(stage.price_currency_address).toLowerCase() !== NATIVE_CURRENCY);
       if (pricedStages.length) return warn(chatId, 'This collection’s current or next public sale uses a token other than ETH. MintPilot’s current maximum-spend setting is ETH-based, so this OpenSea route is not available for that stage.');
       if (!(await rpc.hasCode(d.chain, contract))) return warn(chatId, 'OpenSea returned a collection without a deployed contract on this network. Check the collection or choose another result.');
+      const out = await readMintedOut(rpc, d.chain, contract);
+      if (out) return warn(chatId, mintedOutText(esc(drop.collection_name || slug), out.minted, out.max));
       d.contract = contract;
       d.osSlug = drop.collection_slug;
       d.osFeeBps = drop.fee_bps;
@@ -654,6 +657,32 @@ function createBotHandlers(ctx) {
    * is what must be held. Only informs: the schedule can still be saved and funded later. A lookup that fails or
    * is slow is left out, and without fee data the check falls back to the mint total alone.
    */
+  // When an OpenSea stage is already open, ask OpenSea for the mint transaction (nothing is signed or sent) so a wallet
+  // that is not on the allowlist is flagged before the user confirms. Results are cached briefly to spare the shared API quota.
+  const eligibilityProbes = new Map();
+  const ELIGIBILITY_PROBE_TTL_SEC = 60;
+  async function openSeaEligibilityNote(d) {
+    if (d.preset !== 'adapter:opensea-drop' || !cfg.openSeaApiKey || !d.openSeaDrop?.is_minting || !d.openSeaDrop?.active_stage || !d.wallets?.length) return '';
+    const t = now();
+    for (const [k, v] of eligibilityProbes) if (t - v.at >= ELIGIBILITY_PROBE_TTL_SEC) eligibilityProbes.delete(k);
+    const notListed = [];
+    for (const wallet of d.wallets.slice(0, 3)) {
+      const key = `${d.osSlug}:${wallet.toLowerCase()}:${d.quantity}`;
+      let hit = eligibilityProbes.get(key);
+      if (!hit) {
+        hit = { at: t, notListed: false };
+        try { await buildOpenSeaMintTransaction(d.osSlug, { cfg, minter: wallet, quantity: d.quantity }); }
+        catch (e) {
+          hit.notListed = e?.name === 'OpenSeaApiError' && (e.apiCode === 'MINTER_NOT_ELIGIBLE' || (e.status === 422 && /allow ?list|not eligible|not on the/i.test(String(e.message))));
+        }
+        eligibilityProbes.set(key, hit);
+      }
+      if (hit.notListed) notListed.push(wallet);
+    }
+    if (!notListed.length) return '';
+    return `\n\n⚠️ <b>Not on the allowlist</b>\n${notListed.map((w) => `• <code>${w}</code>`).join('\n')}\nThis stage is open now and OpenSea says ${notListed.length === 1 ? 'this wallet is' : 'these wallets are'} not eligible, so the mint would fail. Choose a different wallet, or only confirm if you expect to be added before the mint.`;
+  }
+
   async function balanceCheck(d, total) {
     const limitMs = ctx.balanceCheckMs ?? BALANCE_CHECK_MS;
     const withLimit = (fn) => {
@@ -694,12 +723,13 @@ function createBotHandlers(ctx) {
     const p = isOpenSeaDrop ? { label: 'OpenSea REST · SeaDrop V1', usesQuantity: true } : (d.preset === 'seadrop' ? { label: 'SeaDrop public mint', usesQuantity: true } : (isThirdweb ? { label: `thirdweb claim (${d.mintSpec.standard === 'erc1155' ? 'ERC-1155' : 'ERC-721'})`, usesQuantity: true } : (d.preset?.startsWith('adapter:') ? { label: `${d.mintSpec.adapter} eligibility mint`, usesQuantity: true } : byId(d.preset))));
     const total = d.preset === 'seadrop' ? BigInt(d.mintSpec.mintPrice) * BigInt(d.quantity) : (d.preset?.startsWith('adapter:') ? BigInt(d.priceWei) * BigInt(d.quantity) : totalWei(d.preset, BigInt(d.priceWei), d.quantity));
     const balance = await balanceCheck(d, total);
+    const eligibility = await openSeaEligibilityNote(d);
     const automationNote = cfg.automation.dryRun
       ? '🧪 This deployment is in dry-run mode: at mint time MintPilot runs every check and reports what it would send, without signing anything.'
       : '🤖 MintPilot signs and sends this mint automatically from each selected wallet, after simulating it. You do not need to sign anything.';
     const routeDetails = isThirdweb ? `thirdweb phase: <b>${esc(String(d.mintSpec.phaseId))}</b>${d.mintSpec.tokenId != null ? ` · token ID <b>${esc(String(d.mintSpec.tokenId))}</b>` : ''}\nPrice per NFT: <b>${formatWei(BigInt(d.mintSpec.pricePerToken))} ETH</b> (exact, from the contract)\n` : isOpenSeaDrop ? `OpenSea collection: <code>${esc(d.mintSpec.slug)}</code>\n` : (d.preset === 'seadrop' ? `SeaDrop router: <code>${d.mintSpec.seaDropContract}</code>\nFee recipient: <code>${d.mintSpec.feeRecipient}</code>\n` : d.preset?.startsWith('adapter:') ? `Eligibility method: <code>${esc(d.mintSpec.adapter)}</code>\n` : '');
     const amountLabel = isOpenSeaDrop ? 'Maximum mint spend per wallet' : 'Mint total per wallet';
-    await wiz(chatId, `<b>Confirm schedule</b> · Review before saving · ${d.wallets.length} wallet${d.wallets.length === 1 ? '' : 's'}\nNetwork: ${esc(chainName(d.chain))}\nNFT contract: <code>${d.contract}</code>\nMint method: ${esc(p.label)}${p.usesQuantity ? ` × ${d.quantity}` : ''}\n${routeDetails}${amountLabel}: <b>${formatWei(total)} ETH</b> (network fee not included)${isOpenSeaDrop ? '\nThe live API-built transaction may cost less, but MintPilot will refuse it if it exceeds this ceiling.' : ''}\nStart: <b>${d.triggerMode === 'launch' ? `As soon as it opens (expected ${fmt(d.launchAt, from.id)}${d.endAt ? `, window ends ${fmt(d.endAt, from.id)}` : ''})` : `At ${fmt(d.when, from.id)}${inText(d.when)}`}</b>\nWallets (${d.wallets.length}):\n${d.wallets.map((w) => `• <code>${w}</code>`).join('\n')}${balance.note}\n\n${automationNote} ⚠️ Check the contract address against the project's official source before confirming.`,
+    await wiz(chatId, `<b>Confirm schedule</b> · Review before saving · ${d.wallets.length} wallet${d.wallets.length === 1 ? '' : 's'}\nNetwork: ${esc(chainName(d.chain))}\nNFT contract: <code>${d.contract}</code>\nMint method: ${esc(p.label)}${p.usesQuantity ? ` × ${d.quantity}` : ''}\n${routeDetails}${amountLabel}: <b>${formatWei(total)} ETH</b> (network fee not included)${isOpenSeaDrop ? '\nThe live API-built transaction may cost less, but MintPilot will refuse it if it exceeds this ceiling.' : ''}\nStart: <b>${d.triggerMode === 'launch' ? `As soon as it opens (expected ${fmt(d.launchAt, from.id)}${d.endAt ? `, window ends ${fmt(d.endAt, from.id)}` : ''})` : `At ${fmt(d.when, from.id)}${inText(d.when)}`}</b>\nWallets (${d.wallets.length}):\n${d.wallets.map((w) => `• <code>${w}</code>`).join('\n')}${balance.note}${eligibility}\n\n${automationNote} ⚠️ Check the contract address against the project's official source before confirming.`,
       kb([[{ text: 'Confirm schedule', callback_data: 'ok' }, { text: 'Cancel', callback_data: 'no' }], ...(balance.short ? [[{ text: '🔄 Check balance again', callback_data: 'cf:refresh' }]] : []), [{ text: '‹ Back', callback_data: 'wz:b:sched.confirm' }]]));
   }
 
@@ -810,6 +840,7 @@ function createBotHandlers(ctx) {
             d.discovery = rpc.discover ? await rpc.discover(d.chain, addr) : null;
           } catch { d.discovery = null; }
           if (d.discovery && d.discovery.nft === false) return warn(chatId, 'That address does not identify itself as an ERC-721 or ERC-1155 NFT contract. Verify the collection address before continuing.');
+          if (d.discovery && isMintedOut(d.discovery.totalSupply, d.discovery.maxSupply)) return warn(chatId, mintedOutText(esc(d.discovery.name || 'This collection'), d.discovery.totalSupply, d.discovery.maxSupply));
           d.contract = addr; setState(db, from.id, 'sched.preset', d, now());
           return askPreset(chatId);
         }
