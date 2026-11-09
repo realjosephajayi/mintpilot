@@ -1,6 +1,12 @@
 # Changelog
 Format: [Keep a Changelog](https://keepachangelog.com/). Review finding numbers refer to `docs/REVIEW.md`.
 
+## [2.3.2] — 2026-11-09
+
+### Fixed
+- Removed the legacy OpenSea JSON configuration fallback. Previously saved OpenSea adapter conversations
+  now return to the friendly collection prompt instead of requesting a JSON object.
+
 ## [2.3.1] — 2026-11-09
 
 ### Added

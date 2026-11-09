@@ -598,6 +598,7 @@ function createBotHandlers(ctx) {
   async function askAdapterConfig(chatId, adapter) {
     if (adapter === 'opensea-drop') {
       const state = getState(db, chatId);
+      if (!state?.data?.contract) return askContractPrompt(chatId, state?.data || {});
       return resolveOpenSeaInput(chatId, { id: chatId }, state.data, { address: state.data.contract });
     }
     const examples = {
@@ -605,13 +606,10 @@ function createBotHandlers(ctx) {
       signature: '{"mintFunction":"mint(address,uint256,uint256,uint256,uint256,bytes)","quantity":1,"maxQuantity":1,"nonce":0,"deadline":1790000000,"signature":"0x...","priceWei":"0"}  — or "providerId":"<operator provider>" instead of the signature fields',
       token: '{"mintFunction":"mint(uint256)","quantity":1,"priceWei":"0","gateContract":"0x...","standard":"erc721","minBalance":1}',
       'seadrop-signed': '{"providerId":"<operator provider>","seaDropContract":"0x00005EA00Ac477B1030CE78506496e8C2dE24bf5","feeRecipient":"0x...","quantity":1}',
-      'opensea-drop': '{"slug":"your-opensea-collection-slug","quantity":1,"priceWei":"10000000000000000"}'
     };
     const state = getState(db, chatId);
     setState(db, chatId, 'sched.adapterConfig', { ...state.data, adapter }, now());
-    const guidance = adapter === 'opensea-drop'
-      ? 'Send the OpenSea collection slug, quantity, and maximum ETH-denominated spend per NFT in wei. This route is for ERC-721 SeaDrop V1 only; OPENSEA_API_KEY must be configured on the server.'
-      : 'Send one JSON object with the exact contract function and eligibility fields. The function must be one of MintPilot’s explicitly supported signatures. Only the fields shown are accepted; eligibility data from elsewhere must come from a provider the operator configured (providerId).';
+    const guidance = 'Send one JSON object with the exact contract function and eligibility fields. The function must be one of MintPilot’s explicitly supported signatures. Only the fields shown are accepted; eligibility data from elsewhere must come from a provider the operator configured (providerId).';
     return wiz(chatId, `<b>${esc(adapter)} mint adapter</b>\n${guidance}\nExample:\n<code>${esc(examples[adapter])}</code>`, nav('sched.adapterConfig'));
   }
 
@@ -815,32 +813,13 @@ function createBotHandlers(ctx) {
           return askPreset(chatId);
         }
         case 'sched.adapterConfig': {
+          // Migrate any OpenSea conversation persisted by v2.3.0 or earlier; never show its legacy JSON form.
+          if (d.adapter === 'opensea-drop') return askContractPrompt(chatId, d);
           let spec;
           try { spec = JSON.parse(text); } catch { return warn(chatId, 'Send a valid JSON object. Use /cancel to restart.'); }
           if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return warn(chatId, 'Send a JSON object. Use /cancel to restart.');
           spec = { ...spec, adapter: d.adapter };
           try { assertSpecKeys(spec, 'user'); } catch (e) { return warn(chatId, adapterErrorText(e)); }
-          if (d.adapter === 'opensea-drop') {
-            try {
-              if (!openSeaChainFor(d.chain)) return warn(chatId, `OpenSea REST minting is not available on ${esc(chainName(d.chain))}.`);
-              const slug = String(spec.slug || '');
-              const quantity = Number(spec.quantity);
-              const priceWei = String(spec.priceWei ?? '');
-              const maxQuantity = Math.min(cfg.maxMintQuantity, 100);
-              if (!Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity) return warn(chatId, `Quantity must be between 1 and ${maxQuantity}.`);
-              if (!/^\d+$/.test(priceWei)) return warn(chatId, 'priceWei must be a non-negative integer amount of wei and represents your maximum price per NFT.');
-              const totalCap = BigInt(priceWei) * BigInt(quantity);
-              if (totalCap > parseEth(cfg.maxMintValueEth)) return warn(chatId, `That spend ceiling exceeds the safety cap of ${cfg.maxMintValueEth} ETH.`);
-              const drop = await getOpenSeaDrop(slug, { cfg });
-              assertDropMatchesSchedule(drop, { chain: d.chain, contract: d.contract, expectedOpenSeaSlug: slug }, slug);
-              d.preset = 'adapter:opensea-drop';
-              d.mintSpec = { adapter: 'opensea-drop', slug, quantity, priceWei, feeBps: drop.fee_bps };
-              d.quantity = quantity;
-              d.priceWei = priceWei;
-              d.openSeaDrop = { collection_name: drop.collection_name, collection_slug: drop.collection_slug, chain: drop.chain, drop_type: drop.drop_type, is_minting: drop.is_minting, active_stage: drop.active_stage, next_stage: drop.next_stage };
-              return askTriggerMode(chatId, d);
-            } catch (e) { return warn(chatId, adapterErrorText(e)); }
-          }
           const sampleWallet = signableWallets(from.id)[0]?.address;
           if (!sampleWallet) return warn(chatId, 'You need a wallet with a signing key before configuring an adapter.');
           try {

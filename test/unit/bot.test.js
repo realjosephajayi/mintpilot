@@ -198,6 +198,16 @@ test('friendly OpenSea flow refuses a known non-ETH public stage instead of pres
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('legacy OpenSea JSON conversation is migrated to the collection prompt and never asks for JSON', async () => {
+  const b = boot(); await b.msg(1, '/start');
+  b.db.prepare('INSERT INTO conversations (telegram_id,state,data,updated_at) VALUES (?,?,?,?)')
+    .run('1', 'sched.adapterConfig', JSON.stringify({ chain: 'base', contract: A(5), adapter: 'opensea-drop' }), T0);
+  await b.msg(1, '{"slug":"example-drop","quantity":1,"priceWei":"10000000000000000"}');
+  assert.equal(convo(b).state, 'sched.contract');
+  assert.match(b.tg.last().args[1], /Find the collection/);
+  assert.doesNotMatch(b.tg.last().args[1], /JSON object|priceWei|Send the OpenSea collection slug/);
+});
+
 test('an inline Merkle proof is scheduled for exactly one chosen wallet', async () => {
   const b = boot(); await b.msg(1, '/start');
   const { extendPremium } = require('../../src/core/users');
