@@ -7,7 +7,7 @@ const path = require('node:path');
 const { T0, A, makeCfg, makeDb, addWallet, fakeTg, getChains, silent } = require('./helpers');
 const { createBotHandlers, COMMANDS } = require('../../src/bot/handlers');
 const { parseWhen } = require('../../src/util/format');
-const { extendPremium } = require('../../src/core/users');
+const { extendPremium, planOf } = require('../../src/core/users');
 const { createLimiter } = require('../../src/util/ratelimit');
 const { getUser } = require('../../src/core/users');
 const { payloadFor } = require('../../src/core/payments');
@@ -1068,4 +1068,14 @@ test('confirm: without fee data the check falls back to the mint total alone', a
     assert.match(text, /Balance: <b>0\.021 ETH<\/b> ✅ covers the mint total\. Keep a little extra for the network fee\./);
     assert.doesNotMatch(text, /gas reserve/);
   }
+});
+
+test('admins get Premium with no expiry, and /revoke cannot remove it', async () => {
+  const b = boot(); await b.msg(1, '/start'); await b.msg(999, '/start');
+  assert.equal(planOf(getUser(b.db, 999), T0), 'premium');
+  assert.equal(planOf(getUser(b.db, 999), T0 + 5 * 365 * 86400), 'premium');   // years later: still Premium
+  assert.equal(planOf(getUser(b.db, 1), T0), 'free');                          // ordinary users are unaffected
+  await b.msg(999, '/revoke 999');
+  assert.equal(planOf(getUser(b.db, 999), T0), 'premium');
+  assert.match(b.tg.last().args[1], /Admins always have Premium/);
 });

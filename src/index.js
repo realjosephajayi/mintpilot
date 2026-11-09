@@ -3,6 +3,7 @@
 // Only ONE process may run the bot role (Telegram long polling) and ONE the worker role per database.
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
+const { grantAdminPremium } = require('./core/users');
 const { getChains } = require('./chains');
 const { createTelegram } = require('./telegram');
 const { createRpc } = require('./core/rpc');
@@ -27,6 +28,7 @@ async function main() {
   for (const w of cfg.warnings) console.warn(`Config: ${w}`);
 
   const db = openDb(cfg.dbPath);
+  grantAdminPremium(db, cfg.adminIds); // admins already in the database get Premium with no expiry
   const chains = getChains(cfg);
   const rpc = createRpc(chains, { ...cfg.rpc, etherscanApiKey: cfg.etherscanApiKey, log: console });
   const fastExecution = createFastExecution({ rpc, db, cfg, chains, log: console });

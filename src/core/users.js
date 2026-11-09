@@ -27,6 +27,20 @@ function upsertUser(db, { id, username }, now) {
 const getUser = (db, id) => db.prepare('SELECT * FROM users WHERE telegram_id=?').get(String(id));
 const planOf = (user, now) => (user && user.premium_until > now ? 'premium' : 'free');
 
+/** Premium expiry stored for admins: year 2100, i.e. no expiry in practice. */
+const ADMIN_PREMIUM_UNTIL = 4102444800;
+const isPermanentPremium = (until) => Number(until) >= ADMIN_PREMIUM_UNTIL;
+
+/** Give every listed admin who already has a user row permanent premium. Safe to call repeatedly. */
+function grantAdminPremium(db, adminIds) {
+  const ids = (adminIds || []).map(String).filter((x) => /^\d+$/.test(x));
+  if (!ids.length) return 0;
+  const stmt = db.prepare('UPDATE users SET premium_until=? WHERE telegram_id=? AND premium_until<?');
+  let n = 0;
+  for (const id of ids) n += stmt.run(ADMIN_PREMIUM_UNTIL, id, ADMIN_PREMIUM_UNTIL).changes;
+  return n;
+}
+
 /** Extend premium from max(now, current expiry). Returns the new expiry. */
 function extendPremium(db, id, days, now) {
   return tx(db, () => {
@@ -48,4 +62,4 @@ function revokePremium(db, id) {
   db.prepare('UPDATE users SET premium_until=0 WHERE telegram_id=?').run(String(id));
 }
 
-module.exports = { upsertUser, getUser, planOf, extendPremium, revokePremium, setUserTimezone };
+module.exports = { upsertUser, getUser, planOf, extendPremium, revokePremium, setUserTimezone, grantAdminPremium, isPermanentPremium, ADMIN_PREMIUM_UNTIL };

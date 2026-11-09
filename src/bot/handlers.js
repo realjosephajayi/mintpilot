@@ -1,5 +1,5 @@
 'use strict';
-const { upsertUser, getUser, planOf, extendPremium, revokePremium, setUserTimezone } = require('../core/users');
+const { upsertUser, getUser, planOf, extendPremium, revokePremium, setUserTimezone, grantAdminPremium, isPermanentPremium } = require('../core/users');
 const { registerReferral, referralStats } = require('../core/referrals');
 const { createLinkSession } = require('../core/sessions');
 const { listWallets, removeWallet, normalizeAddress } = require('../core/wallets');
@@ -217,7 +217,7 @@ function createBotHandlers(ctx) {
   async function cmdWalletPortal(chatId, from, mode = 'menu') {
     if (mode === 'menu') return cmdWallets(chatId, from);
     const u = getUser(db, from.id);
-    if (!isAdmin(cfg, from.id) && planOf(u, now()) !== 'premium') return screen(chatId, 'Adding wallets is a Premium feature. Tap <b>Plan</b> in the menu to upgrade.', menu());
+    if (planOf(u, now()) !== 'premium') return screen(chatId, 'Adding wallets is a Premium feature. Tap <b>Plan</b> in the menu to upgrade.', menu());
     const sid = createLinkSession(db, { telegramId: from.id, domain: new URL(cfg.publicUrl).host, ttlSec: 600 }, now());
     const url = `${cfg.publicUrl}/import?s=${sid}&mode=${mode}`;
     const text = '<b>Add a wallet</b>\nOpen the private page below. Never paste a private key or recovery phrase into Telegram.\n\nMintPilot stores the wallet\'s key encrypted so it can sign your scheduled mints. Use a dedicated wallet, not one holding valuable funds. The ownership check is free and sends no transaction.';
@@ -245,7 +245,7 @@ function createBotHandlers(ctx) {
       const kind = w.wallet_type === 'platform' ? 'Main wallet · custodial' : hasSigningKey(w) ? 'Added wallet · custodial' : 'Signature-only wallet · cannot be auto-signed';
       return `• ${kind}\n  <code>${w.address}</code>\n${funded.length ? funded.join('\n') : '  No ETH on any supported network yet.'}${failed.length ? `\n  <i>Balance unavailable right now on: ${esc(failed.join(', '))}</i>` : ''}`;
     });
-    const premium = isAdmin(cfg, from.id) || planOf(getUser(db, from.id), now()) === 'premium';
+    const premium = planOf(getUser(db, from.id), now()) === 'premium';
     const limit = cfg.plans.premium.wallets;
     const removeRows = ws.filter((w) => w.wallet_type !== 'platform').map((w) => [{ text: `🗑 Remove ${shortAddr(w.address)}`, callback_data: `rm:${w.id}` }]);
     const addRows = premium
@@ -350,17 +350,14 @@ function createBotHandlers(ctx) {
     const u = getUser(db, from.id); const t = now();
     const f = cfg.plans.free; const p = cfg.plans.premium;
     const additional = Math.max(0, p.wallets - 1);
-    const you = isAdmin(cfg, from.id)
-      ? '<b>admin</b> (unlimited Premium)'
-      : `<b>${planOf(u, t)}</b>${u.premium_until > t ? ` (until ${fmt(u.premium_until, from.id)})` : ''}`;
-    return `<b>Plans</b>\n\n<b>Free</b>\n• ${f.activeSchedules} active schedules\n• ${f.wallets} platform wallet\n• ${f.pendingTxs} tracked pending txs\n• Reminder at mint time\n\n<b>Premium</b> — ${cfg.premium.priceStars} ⭐ / ${cfg.premium.days} days\n• ${p.activeSchedules} active schedules\n• ${p.wallets} total wallets (1 platform + ${additional} additional)\n• ${p.pendingTxs} tracked pending txs\n• Pre-mint alerts 10 min and 1 min before start\n\nYou: ${you}`;
+    return `<b>Plans</b>\n\n<b>Free</b>\n• ${f.activeSchedules} active schedules\n• ${f.wallets} platform wallet\n• ${f.pendingTxs} tracked pending txs\n• Reminder at mint time\n\n<b>Premium</b> — ${cfg.premium.priceStars} ⭐ / ${cfg.premium.days} days\n• ${p.activeSchedules} active schedules\n• ${p.wallets} total wallets (1 platform + ${additional} additional)\n• ${p.pendingTxs} tracked pending txs\n• Pre-mint alerts 10 min and 1 min before start\n\nYou: <b>${planOf(u, t)}</b>${u.premium_until > t ? (isPermanentPremium(u.premium_until) ? ' (no expiry)' : ` (until ${fmt(u.premium_until, from.id)})`) : ''}`;
   }
   async function cmdPlans(chatId, from) { await screen(chatId, planText(from), withMenu()); }
 
   // The menu's Plan button: plan details, upgrade button and the invite link on one screen.
   async function cmdPlan(chatId, from) {
     const u = getUser(db, from.id);
-    const premium = isAdmin(cfg, from.id) || planOf(u, now()) === 'premium';
+    const premium = planOf(u, now()) === 'premium';
     const link = `https://t.me/${ctx.botUsername}?start=ref_${u.ref_code}`;
     await screen(chatId, `${planText(from)}\n\n<b>Invite friends</b>\nYou get <b>${cfg.referral.referrerDays} days</b> of Premium when a friend you invite links a wallet with some on-chain history.\n<code>${link}</code>`,
       withMenu([[{ text: premium ? `Add ${cfg.premium.days} more days · ${cfg.premium.priceStars} ⭐` : `Get Premium · ${cfg.premium.priceStars} ⭐`, callback_data: 'm:upgrade' }]]));
@@ -388,6 +385,7 @@ function createBotHandlers(ctx) {
   async function cmdRevoke(chatId, from, args) {
     if (!isAdmin(from.id)) return;
     if (!/^\d+$/.test(args[0] || '') || !getUser(db, args[0])) return say(chatId, 'Usage: /revoke &lt;telegramId&gt;');
+    if (isAdmin(args[0])) return say(chatId, 'Admins always have Premium. To remove it, take that ID out of ADMIN_TELEGRAM_IDS first.');
     revokePremium(db, args[0]);
     await say(chatId, 'Premium revoked.');
   }
@@ -1072,6 +1070,7 @@ function createBotHandlers(ctx) {
     // Confirming a cancellation answers the press itself, with a toast saying what happened.
     if (!data.startsWith('xy:')) await tg.answerCallbackQuery(q.id).catch(() => {});
     const { user } = upsertUser(db, { id: from.id, username: from.username }, now());
+    if (isAdmin(from.id)) grantAdminPremium(db, [from.id]); // admins always have Premium, with no expiry
     if (user.banned) { if (data.startsWith('xy:')) await tg.answerCallbackQuery(q.id).catch(() => {}); return; }
     await ensureUserWallet(from.id);
     // Every button press edits the message it was tapped on: the chat stays one card, and "‹ Menu" brings it home.
@@ -1140,6 +1139,7 @@ function createBotHandlers(ctx) {
     const chatId = m.chat.id; const from = m.from;
     const text = (m.text || '').trim();
     const { user, isNew } = upsertUser(db, { id: from.id, username: from.username }, now());
+    if (isAdmin(from.id)) grantAdminPremium(db, [from.id]); // admins always have Premium, with no expiry
     if (user.banned) return;
     if (!ctx.limiter.allow(String(from.id))) return;
     await ensureUserWallet(from.id);
