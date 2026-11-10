@@ -52,6 +52,12 @@ async function main() {
   if (roles.has('bot')) {
     const me = await tg.getMe();
     await tg.setMyCommands(COMMANDS).catch(() => {});
+    // What people see before they tap Start, and in the bot's profile and link previews.
+    await tg.call('setMyDescription', { description: '⚡ MintPilot mints NFTs for you, automatically.\n\nPick a collection, set a time, and MintPilot signs and sends the mint from your wallet the moment it opens: no waiting up, no missed drops.\n\nWorks on Base, Ethereum, Ink, Robinhood Chain and more. Tap Start to begin.' }).catch(() => {});
+    await tg.call('setMyShortDescription', { short_description: 'Automatic NFT minting: set a time and MintPilot mints for you. ⚡' }).catch(() => {});
+    // Operators hear about problems without watching the logs. Repeats of the same error are muted for a minute.
+    const alertAdmins = (text) => Promise.all(cfg.adminIds.map((id) => tg.sendMessage(id, text).catch(() => {})));
+    const lastAlert = new Map();
     const limiter = createLimiter({ limit: cfg.bot.userMessagesPerWindow, windowSec: cfg.bot.userWindowSec });
     sweepers.push(setInterval(() => limiter.sweep(), 60_000));
     const handler = createBotHandlers({ tg, db, cfg, chains, rpc, buildMintTx, now, botUsername: me.username, limiter, log: console });
@@ -59,10 +65,23 @@ async function main() {
     const onError = (u, e) => {
       const chatId = u.message?.chat?.id ?? u.callback_query?.message?.chat?.id;
       if (chatId == null || e?.blocked) return null;
+      const key = String(e?.message || e).slice(0, 160);
+      const t = Date.now();
+      if (t - (lastAlert.get(key) || 0) > 60_000) {
+        lastAlert.set(key, t);
+        alertAdmins(`⚠️ <b>Bot error</b>\n<code>${key.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))}</code>`);
+      }
       return tg.sendMessage(chatId, 'Something went wrong on our side. Please try again in a moment; if it keeps happening, send /cancel and start over.');
     };
     poller = createPoller({ tg, db, handler, log: console, onError, maxConcurrent: cfg.bot.maxConcurrentUpdates });
     console.log(`Bot @${me.username} ready.`);
+    if (process.env.ADMIN_STARTUP_NOTICE !== 'false') {
+      let version = '?';
+      try { version = require('../package.json').version; } catch { /* optional */ }
+      const active = db.prepare("SELECT COUNT(*) n FROM schedules WHERE status IN ('scheduled','ready')").get().n;
+      const mode = !a.enabled ? 'automation off' : (a.dryRun ? '🧪 dry-run' : '🔴 live signing');
+      alertAdmins(`🟢 <b>MintPilot is online</b> · v${version}\n${mode} · ${active} active schedule${active === 1 ? '' : 's'}`);
+    }
   }
   if (roles.has('worker')) worker = createWorker({ db, cfg, tg, rpc, chains, fastExecution });
 

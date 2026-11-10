@@ -229,10 +229,10 @@ function createWorker({
           ackMs: attempt.acked_at_ms && attempt.fired_at_ms ? attempt.acked_at_ms - attempt.fired_at_ms : null, gasUsed: r.gasUsed ?? null });
       }
     }
-    const icon = r.status === 'confirmed' ? '✅' : '❌';
+    const headline = r.status === 'confirmed' ? `🎉 <b>Mint confirmed</b> on ${esc(chain.name)}` : `❌ <b>Transaction failed</b> on ${esc(chain.name)}`;
     const tokens = tokenIds.length ? `\nNFT token ID${tokenIds.length > 1 ? 's' : ''} received: ${tokenIds.slice(0, 20).map(esc).join(', ')}` : '';
     const exhausted = sched && r.status === 'failed' && Number(sched.chain_retries) >= maxChainRetries && maxChainRetries > 0 ? `\nMintPilot already re-signed it ${maxChainRetries} time(s) and stopped.` : '';
-    await safeSend(row.telegram_id, `${icon} Transaction ${r.status} on ${esc(chain.name)} (block ${r.blockNumber})${tokens}${landing}${exhausted}\n${txUrl(chain, row.tx_hash)}`);
+    await safeSend(row.telegram_id, `${headline} (block ${r.blockNumber})${tokens}${landing}${exhausted}\n${txUrl(chain, row.tx_hash)}`);
     // Referral reward: the referee's first confirmed MintPilot mint (real, paid on-chain activity).
     if (sched && r.status === 'confirmed') {
       const rewarded = rewardReferral(db, cfg, row.telegram_id, t);
@@ -286,7 +286,17 @@ function createWorker({
     const kind = t >= dueAt - 60 ? 'pre1' : (t >= dueAt - 600 ? 'pre10' : null);
     if (!kind || !completeReminder(db, s.id, kind, t)) return;
     const chain = chains[s.chain];
-    notifyLater(s.telegram_id, `🔔 <b>Automatic mint in ~${kind === 'pre1' ? 1 : 10} min</b> (${utc(dueAt)})\n<b>Schedule #${s.id}</b> · ${esc(chain ? chain.name : s.chain)}\nContract: <code>${s.contract}</code>\nWallet: <code>${shortAddr(s.wallet_address)}</code>\n\nMintPilot signs automatically. Keep at least ${formatWei(s.total_wei)} ETH plus gas in this wallet on ${esc(chain ? chain.name : s.chain)}.`);
+    // Say what the wallet really needs: for OpenSea the saved amount is only a ceiling, and a free mint needs just the network fee.
+    let adapter = null;
+    try { adapter = JSON.parse(s.mint_spec || 'null')?.adapter; } catch { adapter = null; }
+    const where = esc(chain ? chain.name : s.chain);
+    const isFree = /^\d+$/.test(String(s.total_wei)) && BigInt(s.total_wei) === 0n;
+    const fundsLine = adapter === 'opensea-drop'
+      ? `MintPilot signs automatically and reads the exact price from OpenSea at mint time, never above your limit of ${formatWei(s.total_wei)} ETH. Keep enough ETH for the network fee in this wallet on ${where}, plus the mint price if it is not free.`
+      : (isFree
+        ? `MintPilot signs automatically. This is a free mint, so this wallet only needs ETH for the network fee on ${where}.`
+        : `MintPilot signs automatically. Keep at least ${formatWei(s.total_wei)} ETH plus gas in this wallet on ${where}.`);
+    notifyLater(s.telegram_id, `🔔 <b>Automatic mint in ~${kind === 'pre1' ? 1 : 10} min</b> (${utc(dueAt)})\n<b>Schedule #${s.id}</b> · ${esc(chain ? chain.name : s.chain)}\nContract: <code>${s.contract}</code>\nWallet: <code>${shortAddr(s.wallet_address)}</code>\n\n${fundsLine}`);
   }
 
   async function processCandidates(t) {

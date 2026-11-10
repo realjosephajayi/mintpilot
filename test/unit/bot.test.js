@@ -369,7 +369,7 @@ const buttons = (m) => (m.args[2]?.reply_markup?.inline_keyboard || []).flat();
 const callbacks = (m) => buttons(m).map((x) => x.callback_data);
 
 test('the Telegram command menu lists seven commands and every one is handled', async () => {
-  assert.deepEqual(COMMANDS.map((c) => c.command), ['start', 'schedule', 'mints', 'wallets', 'dashboard', 'timezone', 'help']);
+  assert.deepEqual(COMMANDS.map((c) => c.command), ['start', 'schedule', 'mints', 'wallets', 'dashboard', 'timezone', 'support', 'help']);
   const b = boot({ rpc: rpcOk });
   for (const c of COMMANDS) { await b.msg(1, `/${c.command}`); assert.doesNotMatch(b.tg.last().args[1], /Unknown command/, c.command); }
 });
@@ -1078,4 +1078,38 @@ test('admins get Premium with no expiry, and /revoke cannot remove it', async ()
   await b.msg(999, '/revoke 999');
   assert.equal(planOf(getUser(b.db, 999), T0), 'premium');
   assert.match(b.tg.last().args[1], /Admins always have Premium/);
+});
+
+test('support: a user message reaches the admins, and an admin can reply', async () => {
+  const b = boot(); await b.msg(1, '/start'); await b.msg(999, '/start');
+  await b.msg(1, '/support');
+  assert.match(b.tg.last().args[1], /Contact support/);
+  await b.msg(1, 'My mint number 1 did not run');
+  assert.ok(b.tg.texts().some((x) => /Support message/.test(x) && /My mint number 1 did not run/.test(x) && /\/reply 1 /.test(x)));
+  assert.match(b.tg.last().args[1], /We have your message/);
+  await b.msg(999, '/reply 1 We are on it');
+  assert.ok(b.tg.texts().some((x) => /MintPilot support/.test(x) && /We are on it/.test(x)));
+  await b.msg(1, '/reply 1 hi'); // ordinary users cannot use the admin reply command
+  assert.equal(b.tg.texts().filter((x) => /MintPilot support/.test(x)).length, 1);
+});
+
+test('announce: admins preview then send to every user; others are ignored', async () => {
+  const b = boot(); await b.msg(1, '/start'); await b.msg(2, '/start'); await b.msg(999, '/start');
+  await b.msg(1, '/announce hello everyone');
+  assert.ok(!b.tg.texts().some((x) => /Preview/.test(x)));
+  await b.msg(999, '/announce Maintenance at 10:00 UTC');
+  assert.match(b.tg.last().args[1], /Send this to <b>3<\/b> users/);
+  const mentions = () => b.tg.texts().filter((x) => /MintPilot update/.test(x) && /Maintenance at 10:00 UTC/.test(x)).length;
+  assert.equal(mentions(), 1, 'only the preview exists before the admin confirms');
+  await b.cb(999, 'ann:send');
+  assert.equal(mentions(), 1 + 3, 'the preview plus one announcement per user');
+});
+
+test('health: admin-only status card', async () => {
+  const b = boot(); await b.msg(1, '/start'); await b.msg(999, '/start');
+  await b.msg(1, '/health');
+  assert.ok(!b.tg.texts().some((x) => /MintPilot health/.test(x)));
+  await b.msg(999, '/health');
+  assert.match(b.tg.last().args[1], /MintPilot health/);
+  assert.match(b.tg.last().args[1], /Users: 2/);
 });

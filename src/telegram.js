@@ -158,6 +158,7 @@ function createTelegram({ token, fetchImpl = fetch, baseUrl = 'https://api.teleg
     getUpdates: (p, { signal } = {}) => call('getUpdates', p, { timeoutMs: (p.timeout || 0) * 1000 + 10000, signal }),
     deleteWebhook: () => call('deleteWebhook', { drop_pending_updates: false }),
     setMyCommands: (commands) => call('setMyCommands', { commands }),
+    sendChatAction: (chat_id, action = 'typing') => call('sendChatAction', { chat_id, action }),
     sendMessage: (chat_id, text, extra = {}) => paced(chat_id, 'sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra }),
     editMessageText: (chat_id, message_id, text, extra = {}) => paced(chat_id, 'editMessageText', { chat_id, message_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra }),
     deleteMessage: (chat_id, message_id) => call('deleteMessage', { chat_id, message_id }),
