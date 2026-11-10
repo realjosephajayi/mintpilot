@@ -14,6 +14,7 @@ const { sealAsync } = require('../core/custodialWallets');
 const { getDashboardSession } = require('../core/dashboard');
 const { createLimiter } = require('../util/ratelimit');
 const { shortAddr } = require('../util/format');
+const { getChains } = require('../chains');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FILES = {
@@ -114,10 +115,22 @@ function createWebServer({ db, cfg, verifySignature, notify, health = null, now 
     const session = getDashboardSession(db, sid, now());
     if (!session) return fail(res, 400, 'This dashboard link has expired. Send /dashboard to the bot again.');
     const wallets = db.prepare('SELECT address, wallet_type, verified_at, CASE WHEN ciphertext IS NOT NULL THEN 1 ELSE 0 END AS has_custodial_key FROM wallets WHERE telegram_id=? ORDER BY id').all(session.telegram_id);
-    const schedules = db.prepare(`SELECT id, chain, contract, preset, quantity, total_wei, scheduled_at, status, tx_hash, trigger_mode, launch_at, end_at, last_error
+    const schedules = db.prepare(`SELECT id, chain, contract, preset, quantity, total_wei, wallet_address, scheduled_at, created_at, status, tx_hash, trigger_mode, launch_at, end_at, last_error, attempts
       FROM schedules WHERE telegram_id=? ORDER BY scheduled_at DESC LIMIT 100`).all(session.telegram_id);
     const tracked = db.prepare('SELECT schedule_id, chain, tx_hash, status, block_number, token_ids, created_at FROM tracked_txs WHERE telegram_id=? ORDER BY created_at DESC LIMIT 100').all(session.telegram_id);
-    return send(res, 200, { expiresAt: session.expires_at, wallets, schedules, tracked });
+    // Recent execution attempts: a record of what MintPilot tried and what happened. Error text is cleaned of URLs (RPC endpoints can carry keys).
+    const activity = db.prepare(`SELECT a.schedule_id, a.chain, a.status, a.error, a.tx_hash, a.created_at
+      FROM execution_attempts a JOIN schedules s ON s.id = a.schedule_id WHERE s.telegram_id=? ORDER BY a.created_at DESC, a.id DESC LIMIT 100`).all(session.telegram_id)
+      .map((a) => ({ ...a, error: a.error ? String(a.error).replace(/https?:\/\/\S+/gi, '[link]').replace(/[\r\n\u0000-\u001f]+/g, ' ').slice(0, 160) : null }));
+    // Explorer base URLs so the page can link each transaction.
+    const explorers = {};
+    let known = {};
+    try { known = getChains(cfg); } catch { /* links are optional */ }
+    for (const key of new Set([...schedules, ...tracked, ...activity].map((r) => r.chain))) {
+      const explorer = known[key] && known[key].explorer;
+      if (typeof explorer === 'string' && /^https?:\/\//.test(explorer)) explorers[key] = explorer.replace(/\/+$/, '');
+    }
+    return send(res, 200, { now: now(), expiresAt: session.expires_at, wallets, schedules, tracked, activity, explorers });
   }
 
   const handler = async (req, res) => {

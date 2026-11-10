@@ -51,6 +51,18 @@ test('manual-signing and legacy smart-account routes no longer exist', async () 
   await w.close();
 });
 
+test('dashboard API carries live-refresh data: server time, wallet, recent attempts and explorer links', async () => {
+  const w = await boot(); addUser(w.db, 1); addWallet(w.db, w.cfg, 1, A(1));
+  createSchedule(w.db, w.cfg, w.chains, { telegramId: 1, chain: 'base', contract: A(5), preset: 'mint(uint256)', quantity: 1, priceWei: '0.01', scheduledAt: T0 + 3600, wallet: A(1) }, T0);
+  const sid = createDashboardSession(w.db, { telegramId: 1, now: T0 });
+  const result = await (await fetch(`${w.base}/api/dashboard?s=${sid}`)).json();
+  assert.equal(result.now, T0);
+  assert.equal(result.schedules[0].wallet_address.toLowerCase(), A(1).toLowerCase());
+  assert.ok(Array.isArray(result.activity));
+  assert.equal(typeof result.explorers, 'object');
+  await w.close();
+});
+
 test('dashboard is private, read-only, scoped to the session owner and shows the last status', async () => {
   const w = await boot(); addUser(w.db, 1); addWallet(w.db, w.cfg, 1, A(1));
   const id = createSchedule(w.db, w.cfg, w.chains, { telegramId: 1, chain: 'base', contract: A(5), preset: 'mint(uint256)', quantity: 1, priceWei: '0.01', scheduledAt: T0 + 3600, wallet: A(1) }, T0);

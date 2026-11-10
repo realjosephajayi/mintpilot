@@ -178,3 +178,15 @@ body[data-page="import"] .status { margin: 16px 0 0; padding: 11px 14px; border:
 body[data-page="import"] .status:empty { display: none; }
 body[data-page="import"] .status.good { background: rgba(90,225,97,.08); border-color: rgba(90,225,97,.35); color: var(--green); }
 body[data-page="import"] .status.bad { background: rgba(255,138,128,.1); border-color: rgba(255,138,128,.4); color: var(--bad); }
+
+/* Dashboard: live indicator and history filters */
+.live-dot { display: inline-block; width: 9px; height: 9px; margin-right: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(90,225,97,.6); animation: live-pulse 1.8s infinite; vertical-align: middle; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 rgba(90,225,97,.55); } 70% { box-shadow: 0 0 0 9px rgba(90,225,97,0); } 100% { box-shadow: 0 0 0 0 rgba(90,225,97,0); } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+button.filter { width: auto; margin-top: 0; padding: 6px 14px; cursor: pointer; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: .82rem; font-weight: 600; box-shadow: none; }
+button.filter:hover { color: var(--fg); background: transparent; border-color: rgba(90,225,97,.4); }
+button.filter[aria-pressed="true"] { color: var(--green); background: rgba(90,225,97,.1); border-color: rgba(90,225,97,.45); }
+body[data-page="dashboard"] td[data-label="ID"], body[data-page="dashboard"] td[data-label="Mint"] { white-space: nowrap; }
+body[data-page="dashboard"] td a { color: var(--green); text-decoration: none; }
+body[data-page="dashboard"] td a:hover { text-decoration: underline; }

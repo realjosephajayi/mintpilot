@@ -25,24 +25,35 @@
   </header>
 
   <section class="overview-strip" aria-label="Account summary">
-    <article class="overview-stat"><span>Wallets</span><strong id="wallet-count">—</strong></article>
-    <article class="overview-stat"><span>Mint schedules</span><strong id="schedule-count">—</strong></article>
-    <article class="overview-stat"><span>Transactions</span><strong id="transaction-count">—</strong></article>
+    <article class="overview-stat"><span>Live &amp; upcoming</span><strong id="live-count">—</strong></article>
+    <article class="overview-stat"><span>Completed</span><strong id="done-count">—</strong></article>
+    <article class="overview-stat"><span>Needs attention</span><strong id="issue-count">—</strong></article>
   </section>
 
-  <section class="card dashboard-card" aria-labelledby="wallets-title">
-    <div class="section-heading"><div><h2 id="wallets-title">Wallets</h2><p class="section-help">MintPilot signs your scheduled mints from these wallets automatically.</p></div></div>
-    <div id="wallets" class="table-wrap"></div>
+  <section class="card dashboard-card" aria-labelledby="live-title">
+    <div class="section-heading"><div><h2 id="live-title"><span class="live-dot" aria-hidden="true"></span>Live &amp; upcoming mints</h2><p class="section-help"><span id="live-updated">Connecting…</span> Amounts exclude network fees (gas).</p></div></div>
+    <div id="live" class="table-wrap"></div>
   </section>
 
-  <section class="card dashboard-card" aria-labelledby="schedules-title">
-    <div class="section-heading"><div><h2 id="schedules-title">Mint schedules</h2><p class="section-help">Amounts exclude network fees (gas).</p></div></div>
-    <div id="schedules" class="table-wrap"></div>
+  <section class="card dashboard-card" aria-labelledby="history-title">
+    <div class="section-heading"><div><h2 id="history-title">Mint history</h2><p class="section-help">Every finished mint, with its outcome and the NFTs received.</p></div></div>
+    <div id="history-filters" class="filters" role="group" aria-label="Filter history"></div>
+    <div id="history" class="table-wrap"></div>
+  </section>
+
+  <section class="card dashboard-card" aria-labelledby="activity-title">
+    <div class="section-heading"><div><h2 id="activity-title">Recent activity</h2><p class="section-help">What MintPilot tried for each mint, newest first.</p></div></div>
+    <div id="activity" class="table-wrap"></div>
   </section>
 
   <section class="card dashboard-card" aria-labelledby="transactions-title">
     <div class="section-heading"><div><h2 id="transactions-title">Transactions</h2><p class="section-help">Mints MintPilot has submitted and is watching for confirmation.</p></div></div>
     <div id="tracked" class="table-wrap"></div>
+  </section>
+
+  <section class="card dashboard-card" aria-labelledby="wallets-title">
+    <div class="section-heading"><div><h2 id="wallets-title">Wallets</h2><p class="section-help">MintPilot signs your scheduled mints from these wallets automatically.</p></div></div>
+    <div id="wallets" class="table-wrap"></div>
   </section>
 
   <footer class="dashboard-footer">
