@@ -229,10 +229,10 @@ function createWorker({
           ackMs: attempt.acked_at_ms && attempt.fired_at_ms ? attempt.acked_at_ms - attempt.fired_at_ms : null, gasUsed: r.gasUsed ?? null });
       }
     }
-    const headline = r.status === 'confirmed' ? `🎉 <b>Mint confirmed</b> on ${esc(chain.name)}` : `❌ <b>Transaction failed</b> on ${esc(chain.name)}`;
+    const icon = r.status === 'confirmed' ? '✅' : '❌';
     const tokens = tokenIds.length ? `\nNFT token ID${tokenIds.length > 1 ? 's' : ''} received: ${tokenIds.slice(0, 20).map(esc).join(', ')}` : '';
     const exhausted = sched && r.status === 'failed' && Number(sched.chain_retries) >= maxChainRetries && maxChainRetries > 0 ? `\nMintPilot already re-signed it ${maxChainRetries} time(s) and stopped.` : '';
-    await safeSend(row.telegram_id, `${headline} (block ${r.blockNumber})${tokens}${landing}${exhausted}\n${txUrl(chain, row.tx_hash)}`);
+    await safeSend(row.telegram_id, `${icon} Transaction ${r.status} on ${esc(chain.name)} (block ${r.blockNumber})${tokens}${landing}${exhausted}\n${txUrl(chain, row.tx_hash)}`);
     // Referral reward: the referee's first confirmed MintPilot mint (real, paid on-chain activity).
     if (sched && r.status === 'confirmed') {
       const rewarded = rewardReferral(db, cfg, row.telegram_id, t);

@@ -105,7 +105,7 @@ async function runPreflight({ schedule, cfg, chains, rpc, buildMintTx, db = null
   let balance = null;
   try {
     balance = BigInt(await rpc.getBalance(schedule.chain, schedule.wallet_address));
-    const value = BigInt(tx?.valueWei ?? schedule.total_wei ?? 0);
+    const value = tx?.pending ? 0n : BigInt(tx?.valueWei ?? schedule.total_wei ?? 0); // a pending OpenSea tx only carries the price ceiling
     add('wallet-balance', balance >= value, balance >= value ? `Wallet has ${balance} wei for a ${value} wei mint value; gas is checked next.` : `Wallet has ${balance} wei but the mint value is ${value} wei.`);
   } catch (e) { add('wallet-balance', false, `Wallet balance check failed: ${asError(e)}`); }
 
@@ -117,7 +117,7 @@ async function runPreflight({ schedule, cfg, chains, rpc, buildMintTx, db = null
     const feeData = typeof provider.getFeeData === 'function' ? await provider.getFeeData() : {};
     const fee = feeData.maxFeePerGas || feeData.gasPrice;
     const reserve = !policy.ok || fee == null ? 0n : policy.gasLimit * BigInt(fee);
-    const enough = policy.ok && balance != null && balance >= BigInt(tx.valueWei) + reserve;
+    const enough = policy.ok && balance != null && balance >= (tx.pending ? 0n : BigInt(tx.valueWei)) + reserve;
     const detail = !policy.ok
       ? `Gas estimate ${estimate} exceeds the cap ${policy.cap} for ${tx.quantity} token(s).`
       : `Gas estimate ${estimate}; gas limit ${policy.gasLimit} (cap ${policy.cap}); reserve ${reserve} wei${enough ? '.' : ' — wallet cannot cover value plus gas.'}`;

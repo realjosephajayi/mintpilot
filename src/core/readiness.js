@@ -14,7 +14,8 @@ async function checkMintReadiness({ schedule, cfg, chains, rpc, buildMintTx, db 
     listedInEligibilityFile: null,
     contractExists: null,
     nativeBalanceWei: null,
-    requiredMintWei: String(schedule.total_wei),
+    // For OpenSea REST the saved amount is only a price ceiling; the real price is read from OpenSea when the transaction is built.
+    requiredMintWei: (() => { try { return JSON.parse(schedule.mint_spec || 'null')?.adapter === 'opensea-drop' ? '0' : String(schedule.total_wei); } catch { return String(schedule.total_wei); } })(),
     tokenGate: null,
     nftBalance: null,
     alreadyTrackedMint: false,

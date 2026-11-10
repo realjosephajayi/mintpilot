@@ -35,7 +35,6 @@ const COMMANDS = [
   { command: 'wallets', description: 'Your wallets and balances' },
   { command: 'dashboard', description: 'Open your dashboard' },
   { command: 'timezone', description: 'Set your time zone' },
-  { command: 'support', description: 'Contact support' },
   { command: 'help', description: 'How MintPilot works' }
 ];
 
@@ -212,7 +211,7 @@ function createBotHandlers(ctx) {
   }
 
   async function cmdHelp(chatId) {
-    await screen(chatId, `<b>How MintPilot works</b>\nYou schedule a mint and MintPilot signs and sends it automatically from your wallet. There is nothing for you to sign.\n\n<b>Commands</b>\n/schedule — set up a mint\n/mints — see, check or cancel your mints\n/wallets — your address and balances\n/dashboard — a private view of your activity on the web\n/support — talk to us\n/cancel — stop the current setup\n\n<b>Before a mint</b>\nKeep enough ETH in your wallet for the mint price plus network fees, on the network you chose.\n\n<b>Networks</b>: ${esc(networkList())}\n\nAdvanced: /track &lt;network&gt; &lt;txHash&gt; follows a transaction, and /check &lt;address&gt; looks an address up in the allowlist file.\n\n🔒 Never send a private key or recovery phrase in Telegram.`, menu());
+    await screen(chatId, `<b>How MintPilot works</b>\nYou schedule a mint and MintPilot signs and sends it automatically from your wallet. There is nothing for you to sign.\n\n<b>Commands</b>\n/schedule — set up a mint\n/mints — see, check or cancel your mints\n/wallets — your address and balances\n/dashboard — a private view of your activity on the web\n/cancel — stop the current setup\n\n<b>Before a mint</b>\nKeep enough ETH in your wallet for the mint price plus network fees, on the network you chose.\n\n<b>Networks</b>: ${esc(networkList())}\n\nAdvanced: /track &lt;network&gt; &lt;txHash&gt; follows a transaction, and /check &lt;address&gt; looks an address up in the allowlist file.\n\n🔒 Never send a private key or recovery phrase in Telegram.`, menu());
   }
 
 
@@ -398,78 +397,6 @@ function createBotHandlers(ctx) {
     await say(chatId, `Users: ${c('SELECT COUNT(*) n FROM users')}\nPremium: ${c('SELECT COUNT(*) n FROM users WHERE premium_until>?', t)}\nWallets: ${c('SELECT COUNT(*) n FROM wallets')}\nActive schedules: ${c("SELECT COUNT(*) n FROM schedules WHERE status IN ('scheduled','ready')")}\nStars received: ${c('SELECT COALESCE(SUM(amount),0) n FROM payments')}`);
   }
 
-
-  // ───────── support & admin tools ─────────
-  const ANNOUNCE_MAX = 3000;
-  const adminTextOf = (raw) => String(raw || '').replace(/^\/\w+(?:@\w+)?\s*/, '').trim();
-
-  async function cmdSupport(chatId, from) {
-    if (!cfg.adminIds.length) return say(chatId, 'Support is not set up on this bot yet. Please try again later.', menu());
-    setState(db, from.id, 'support.msg', {}, now());
-    return say(chatId, '💬 <b>Contact support</b>\nTell us what you need in one message: what you were doing, what went wrong, and the mint number (like #3) if it is about a schedule.\n\n🔒 Never include a private key or recovery phrase.\nSend /cancel to stop.');
-  }
-  async function sendSupportMessage(chatId, from, text) {
-    const body = text.trim();
-    if (body.length < 5) return warn(chatId, 'Please add a few more details so we can help.');
-    if (body.length > 1500) return warn(chatId, 'That is a bit long. Please keep it under 1500 characters.');
-    clearState(db, from.id);
-    const who = from.username ? `@${esc(from.username)}` : esc([from.first_name, from.last_name].filter(Boolean).join(' ') || 'a user');
-    await Promise.all(cfg.adminIds.map((id) => tg.sendMessage(id, `📩 <b>Support message</b>\nFrom ${who} (<code>${from.id}</code>)\n\n${esc(body)}\n\nReply with: <code>/reply ${from.id} your message</code>`).catch(() => {})));
-    return say(chatId, '✅ Thanks! We have your message and will reply here as soon as we can.', menu());
-  }
-  async function cmdReply(chatId, from, raw) {
-    if (!isAdmin(from.id)) return;
-    const m = adminTextOf(raw).match(/^(\d+)\s+([\s\S]+)$/);
-    if (!m || !getUser(db, m[1])) return say(chatId, 'Usage: /reply &lt;telegramId&gt; &lt;message&gt; (the user must have started the bot)');
-    try {
-      await tg.sendMessage(m[1], `💬 <b>MintPilot support</b>\n${esc(m[2].slice(0, 3000))}`);
-      return say(chatId, '✅ Sent.');
-    } catch { return say(chatId, 'Could not deliver that message. The user may have blocked the bot.'); }
-  }
-  async function cmdAnnounce(chatId, from, raw) {
-    if (!isAdmin(from.id)) return;
-    const text = adminTextOf(raw);
-    if (!text) return say(chatId, 'Usage: /announce &lt;message&gt;\nI will show you a preview and ask before sending it to every user. The message is sent as plain text.');
-    if (text.length > ANNOUNCE_MAX) return say(chatId, `That is too long. Keep announcements under ${ANNOUNCE_MAX} characters.`);
-    const n = db.prepare('SELECT COUNT(*) n FROM users WHERE blocked_bot=0 AND banned=0').get().n;
-    setState(db, from.id, 'admin.announce', { text }, now());
-    return say(chatId, `📣 <b>Preview</b>\n\n${announcementBody(text)}\n\nSend this to <b>${n}</b> user${n === 1 ? '' : 's'}?`,
-      kb([[{ text: `Send to ${n}`, callback_data: 'ann:send' }, { text: 'Cancel', callback_data: 'ann:no' }]]));
-  }
-  const announcementBody = (text) => `📣 <b>MintPilot update</b>\n\n${esc(text)}`;
-  async function sendAnnouncement(chatId, text) {
-    const rows = db.prepare('SELECT telegram_id FROM users WHERE blocked_bot=0 AND banned=0').all();
-    await say(chatId, `Sending to ${rows.length} user${rows.length === 1 ? '' : 's'}…`);
-    let sent = 0; let failed = 0;
-    for (const r of rows) {
-      try { await tg.sendMessage(r.telegram_id, announcementBody(text)); sent += 1; }
-      catch (e) { failed += 1; if (e?.blocked) db.prepare('UPDATE users SET blocked_bot=1 WHERE telegram_id=?').run(r.telegram_id); }
-    }
-    return say(chatId, `✅ Announcement sent to ${sent} user${sent === 1 ? '' : 's'}${failed ? ` (${failed} could not be reached)` : ''}.`);
-  }
-  async function cmdHealth(chatId, from) {
-    if (!isAdmin(from.id)) return;
-    const t = now();
-    const c = (sql, ...p) => db.prepare(sql).get(...p).n;
-    let version = '?';
-    try { version = require('../../package.json').version; } catch { /* optional */ }
-    const a = cfg.automation;
-    const mode = !a.enabled ? 'automation off' : (a.dryRun ? '🧪 dry-run (nothing is signed)' : '🔴 LIVE signing');
-    const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
-    const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
-    const storage = onRailway ? (volume ? `✅ Railway volume at <code>${esc(volume)}</code>` : '⚠️ <b>No Railway volume detected</b>: data is lost on every redeploy') : 'local disk';
-    const warnings = [];
-    if (!cfg.openSeaApiKey) warnings.push('OPENSEA_API_KEY is not set, so OpenSea mints and lookups are off.');
-    if (!a.encryptionKey) warnings.push('AUTOMATION_MASTER_KEY is missing, so wallets cannot be signed.');
-    if (onRailway && cfg.trustProxyHops !== 1) warnings.push(`TRUST_PROXY_HOPS is ${cfg.trustProxyHops}; on Railway it should be 1.`);
-    if (onRailway && cfg.clientIpHeader) warnings.push('CLIENT_IP_HEADER is set; on Railway leave it empty.');
-    const single = Object.values(chains).filter((x) => x.rpcUrls.length < 2).map((x) => x.key);
-    if (single.length) warnings.push(`Only one RPC on: ${single.join(', ')}.`);
-    const up = Math.floor(process.uptime());
-    const uptime = up >= 3600 ? `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m` : `${Math.floor(up / 60)}m ${up % 60}s`;
-    await say(chatId, `<b>MintPilot health</b> · v${esc(version)}\nUptime: ${uptime}\nMode: ${mode}\nStorage: ${storage}\n\nUsers: ${c('SELECT COUNT(*) n FROM users')} (${c('SELECT COUNT(*) n FROM users WHERE premium_until>?', t)} premium)\nWallets: ${c('SELECT COUNT(*) n FROM wallets')}\nActive schedules: ${c("SELECT COUNT(*) n FROM schedules WHERE status IN ('scheduled','ready')")}\nLast 24h: ${c("SELECT COUNT(*) n FROM schedules WHERE status='confirmed' AND scheduled_at>?", t - 86400)} confirmed, ${c("SELECT COUNT(*) n FROM schedules WHERE status='failed' AND scheduled_at>?", t - 86400)} failed\nOpenSea API: ${cfg.openSeaApiKey ? '✅ configured' : '❌ not set'}${warnings.length ? `\n\n⚠️ <b>Needs attention</b>\n${warnings.map((w) => `• ${esc(w)}`).join('\n')}` : '\n\n✅ No configuration warnings.'}`);
-  }
-
   // ───────── /schedule wizard ─────────
   async function startSchedule(chatId, from) {
     const usable = Object.values(chains).filter((c) => !automationBlocker(cfg, chains, c.key));
@@ -559,7 +486,6 @@ function createBotHandlers(ctx) {
   }
 
   async function prepareOpenSeaCollection(chatId, d, slug, expectedContract = null) {
-    tg.sendChatAction?.(chatId, 'typing')?.catch(() => {});
     if (!openSeaChainFor(d.chain)) return warn(chatId, `OpenSea collection lookup is not available on ${esc(chainName(d.chain))}.`);
     if (!cfg.openSeaApiKey) return warn(chatId, 'Collection lookup is not enabled on this bot yet. Enter the contract address to use the standard mint setup.');
     try {
@@ -900,7 +826,6 @@ function createBotHandlers(ctx) {
           d.quantity = quantity;
           return askOpenSeaPriceCap(chatId, d);
         }
-        case 'support.msg': return sendSupportMessage(chatId, from, text);
         case 'sched.osPrice': {
           const priceWei = parseEth(text.trim().replace(/\s*eth$/i, ''));
           return acceptOpenSeaPriceCap(chatId, d, priceWei);
@@ -1071,11 +996,6 @@ function createBotHandlers(ctx) {
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > max) return;
       d.quantity = quantity;
       return askOpenSeaPriceCap(chatId, d);
-    }
-    if (st.state === 'admin.announce' && (data === 'ann:send' || data === 'ann:no')) {
-      clearState(db, from.id);
-      if (!isAdmin(from.id)) return;
-      return data === 'ann:send' ? sendAnnouncement(chatId, d.text) : say(chatId, 'Announcement cancelled.');
     }
     if (st.state === 'sched.osPrice' && data === 'oscap:free') return acceptOpenSeaPriceCap(chatId, d, 0n);
     if (st.state === 'sched.osPrice' && data === 'oscap:public' && /^\d+$/.test(String(d.osSuggestedPriceWei ?? ''))) {
@@ -1302,10 +1222,6 @@ function createBotHandlers(ctx) {
         case 'grant': return cmdGrant(chatId, from, args);
         case 'revoke': return cmdRevoke(chatId, from, args);
         case 'stats': return cmdStats(chatId, from);
-        case 'health': return cmdHealth(chatId, from);
-        case 'announce': return cmdAnnounce(chatId, from, text);
-        case 'reply': return cmdReply(chatId, from, text);
-        case 'support': return cmdSupport(chatId, from);
         case 'cancel': { const had = getState(db, from.id); clearState(db, from.id); if (had && await abortPane(chatId, menu())) return undefined; return say(chatId, had ? 'Cancelled.' : 'Nothing to cancel.'); }
         default: return say(chatId, 'Unknown command. Try /help.');
       }
