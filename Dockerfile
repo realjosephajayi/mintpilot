@@ -3,6 +3,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY src ./src
+COPY scripts ./scripts
 
 # Build the only browser bundle (the /import wallet portal) from source.
 RUN npm ci
@@ -30,6 +31,7 @@ RUN apt-get update \
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/src ./src
+COPY --from=build /app/scripts ./scripts
 COPY docker/railway-entrypoint.sh /usr/local/bin/mintpilot-entrypoint
 RUN chmod 0755 /usr/local/bin/mintpilot-entrypoint
 
