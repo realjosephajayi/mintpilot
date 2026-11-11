@@ -197,6 +197,9 @@ function createLaunchEngine({
   }
 
   const hotEndMs = (ctx) => ctx.effectiveT * 1000 + L.hotWindowSec * 1000;
+  // Waiting for an OpenSea stage to open can go on longer than the hot window; it only needs a cheap read each time.
+  const canWatchOpenSea = typeof fastExecution.probeOpenSea === 'function';
+  const watchEndMs = (ctx) => ctx.effectiveT * 1000 + Math.max(L.hotWindowSec, L.openSeaWaitSec) * 1000;
 
   async function followUp(ctx, first) {
     let r = first;
@@ -230,11 +233,28 @@ function createLaunchEngine({
         r = await sendNow(ctx);
         continue;
       }
-      if (r.outcome === OUTCOME.WAIT && r.apiCost && !r.notify && inHot) {
-        // OpenSea "not minting yet": every call spends shared API quota, so back off 1, 2, 4, 8 s.
+      if (r.outcome === OUTCOME.WAIT && r.apiCost && !r.notify && (canWatchOpenSea ? nowMs() <= watchEndMs(ctx) : inHot)) {
         apiWaits += 1;
-        const pause = Math.max(Number(r.retryAfterSec || 0) * 1000, Math.min(8000, 1000 * 2 ** (apiWaits - 1)));
-        if (!await sleepFor(pause, ctx)) return;
+        // Tell the user right away instead of leaving them wondering.
+        if (r.inactive) notifyOnce(s, 'inactive', `⏳ Schedule #${s.id}: OpenSea says this mint is not open yet, so nothing was sent.\nMintPilot keeps checking every few seconds and goes ahead the moment it opens. If it sells out first, I will tell you.\nIf you set this time earlier than the real mint time, cancel it in /mints and schedule again for the real opening time.`);
+        const retryAfterMs = Number(r.retryAfterSec || 0) * 1000;
+        let live = null;
+        if (canWatchOpenSea) {
+          // Watch with a cheap read; the mint request is only sent once the stage is live (or the state cannot be read).
+          if (!await sleepFor(Math.max(retryAfterMs, apiWaits === 1 ? 1000 : L.openSeaPollMs), ctx)) return;
+          const current = active(ctx.id);
+          if (!current) return;
+          live = await fastExecution.probeOpenSea(current);
+          if (live === false) continue;
+        }
+        if (live === null) {
+          // Cannot read the drop: keep the original pacing (1, 2, 4, 8 s) inside the hot window, then hand over to the worker.
+          if (!inHot) { apply(s, r); return; }
+          if (!canWatchOpenSea) {
+            const pause = Math.max(retryAfterMs, Math.min(8000, 1000 * 2 ** (apiWaits - 1)));
+            if (!await sleepFor(pause, ctx)) return;
+          }
+        }
         r = await sendNow(ctx);
         continue;
       }

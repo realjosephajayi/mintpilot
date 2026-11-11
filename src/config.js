@@ -205,6 +205,11 @@ function loadConfig(env = process.env) {
       // Fast loop window after T: timing reverts and transient errors retry within milliseconds.
       hotWindowSec: int('LAUNCH_HOT_WINDOW_SECONDS', 120, { min: 10, max: 3600 }),
       retryIntervalMs: int('LAUNCH_RETRY_INTERVAL_MS', 250, { min: 50, max: 10000 }),
+      // OpenSea answers "not minting yet" until its stage starts. After T, check a cheap OpenSea read every
+      // openSeaPollMs for up to openSeaWaitSec and send the mint request only once the stage is live, so a drop that
+      // opens late is minted within seconds instead of after a long retry back-off.
+      openSeaPollMs: int('LAUNCH_OPENSEA_POLL_MS', 2000, { min: 500, max: 30000 }),
+      openSeaWaitSec: int('LAUNCH_OPENSEA_WAIT_SECONDS', 900, { min: 0, max: 6 * 3600 }),
       receiptPollMs: int('LAUNCH_RECEIPT_POLL_MS', 200, { min: 50, max: 5000 }),
       receiptWatchSec: int('LAUNCH_RECEIPT_WATCH_SECONDS', 60, { min: 5, max: 900 }),
       // A mint that reverts on-chain is re-signed (fresh nonce) at most this many times per schedule.

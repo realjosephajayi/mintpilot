@@ -101,7 +101,7 @@ function classifyPreparationError(e) {
     if (e.retryable) return { outcome: OUTCOME.RETRY, userReason: 'OpenSea is rate limiting or temporarily unavailable.', retryAfterSec: e.retryAfterSec };
     // Say plainly why the wallet was refused instead of echoing the raw API text.
     if (code === 'MINTER_NOT_ELIGIBLE' || (e.status === 422 && /allow ?list|not eligible|not on the/i.test(String(e.message)))) return { outcome: OUTCOME.TERMINAL, ineligible: true, userReason: 'This wallet is not on the allowlist (eligible list) for this mint stage, so it cannot mint. Nothing was sent. Use a wallet that is on the list, or check the stage requirements on the project page.' };
-    if (code === 'MINT_LIMIT_EXCEEDED') return { outcome: OUTCOME.TERMINAL, userReason: 'This wallet has already reached the per-wallet mint limit for this stage. Nothing was sent.' };
+    if (code === 'MINT_LIMIT_EXCEEDED') return { outcome: OUTCOME.TERMINAL, userReason: 'This wallet has already reached the per-wallet mint limit for this stage, so nothing was sent. If you already minted from this wallet yourself, that counts toward the limit.' };
     if (code === 'SUPPLY_EXHAUSTED') return { outcome: OUTCOME.TERMINAL, userReason: 'This collection or stage is minted out. Nothing was sent.' };
     if (OPENSEA_TERMINAL.has(code) || (e.status >= 400 && e.status < 500)) return { outcome: OUTCOME.TERMINAL, userReason: e.message };
     return { outcome: OUTCOME.RETRY, userReason: 'OpenSea request failed; retrying.', retryAfterSec: e.retryAfterSec };

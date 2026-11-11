@@ -22,6 +22,7 @@ const { fireAtMs, clockLagMs } = require('./launchTiming');
 const { automationBlocker, hasSigningKey } = require('./automationPolicy');
 const { formatWei } = require('../util/format');
 const { readMintedOut } = require('./supply');
+const { getOpenSeaDrop } = require('./openSeaDrops');
 const { OPEN_ATTEMPT_STATUSES } = require('../db');
 
 const NONCE_CONSUMED_CONFIRM_SEC = 60;
@@ -406,7 +407,29 @@ function createFastExecution({
     return result(outcome, outcome === OUTCOME.WAIT ? `Mint not open yet (${revertLabel(simulation.data, 'simulation reverted')}).` : `The contract rejected the mint: ${revertLabel(simulation.data, simulation.reason)}.`, { retryAt: retryAt || undefined, timing: true });
   }
 
-  return { execute, arm, fire, probe, reconcile, isAvailable, isAllowed, scheduleBlocker, usesSendTimeApi, openAttempt };
+  // One cheap OpenSea read answers "is this drop's stage live?" for every schedule watching the same drop,
+  // so waiting for a late opening does not spend the mint-request quota. true = mint now, false = still closed,
+  // null = cannot tell (the caller then falls back to the normal retry pacing).
+  const dropWatch = new Map();
+  async function probeOpenSea(schedule) {
+    let slug = null;
+    try { slug = JSON.parse(schedule.mint_spec || 'null')?.slug || null; } catch { slug = null; }
+    if (!slug || !cfg.openSeaApiKey) return null;
+    const t = Date.now();
+    for (const [k, v] of dropWatch) if (t - v.at > 60_000) dropWatch.delete(k);
+    const hit = dropWatch.get(slug);
+    if (hit && t - hit.at < 1500) return hit.value;
+    let value = null;
+    try {
+      const drop = await getOpenSeaDrop(slug, { cfg });
+      if (drop && (drop.is_minting === true || drop.active_stage)) value = true;
+      else if (drop && drop.is_minting === false) value = false;
+    } catch { value = null; }
+    dropWatch.set(slug, { at: t, value });
+    return value;
+  }
+
+  return { execute, arm, fire, probe, probeOpenSea, reconcile, isAvailable, isAllowed, scheduleBlocker, usesSendTimeApi, openAttempt };
 }
 
 module.exports = { createFastExecution, launchTarget, usesSendTimeApi, ARM };
