@@ -290,6 +290,11 @@ function createFastExecution({
         if (out) return result(OUTCOME.TERMINAL, `This collection is minted out (${out.minted} / ${out.max}). There is nothing left to mint, so MintPilot stopped this schedule.`);
         return { ...classified, inactive: true };
       }
+      // "Limit reached" and "minted out" arrive as one OpenSea message: a supply read says which one it is.
+      if (classified.limitOrSoldOut) {
+        const out = await readMintedOut(rpc, schedule.chain, schedule.contract);
+        if (out) return result(OUTCOME.TERMINAL, `This collection is minted out (${out.minted} / ${out.max}). There is nothing left to mint, so MintPilot stopped this schedule.`);
+      }
       return classified;
     }
     const { spec, tx } = built;

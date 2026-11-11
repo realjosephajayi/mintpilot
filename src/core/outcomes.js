@@ -100,9 +100,21 @@ function classifyPreparationError(e) {
     if (code === 'INSUFFICIENT_BALANCE') return { outcome: OUTCOME.WAIT, apiCost: true, notify: 'funds', userReason: 'OpenSea reports the wallet cannot pay the price plus gas. Top up the wallet before the stage ends.' };
     if (e.retryable) return { outcome: OUTCOME.RETRY, userReason: 'OpenSea is rate limiting or temporarily unavailable.', retryAfterSec: e.retryAfterSec };
     // Say plainly why the wallet was refused instead of echoing the raw API text.
-    if (code === 'MINTER_NOT_ELIGIBLE' || (e.status === 422 && /allow ?list|not eligible|not on the/i.test(String(e.message)))) return { outcome: OUTCOME.TERMINAL, ineligible: true, userReason: 'This wallet is not on the allowlist (eligible list) for this mint stage, so it cannot mint. Nothing was sent. Use a wallet that is on the list, or check the stage requirements on the project page.' };
-    if (code === 'MINT_LIMIT_EXCEEDED') return { outcome: OUTCOME.TERMINAL, userReason: 'This wallet has already reached the per-wallet mint limit for this stage, so nothing was sent. If you already minted from this wallet yourself, that counts toward the limit.' };
-    if (code === 'SUPPLY_EXHAUSTED') return { outcome: OUTCOME.TERMINAL, userReason: 'This collection or stage is minted out. Nothing was sent.' };
+    const msg = String(e.message || '');
+    if (code === 'MINTER_NOT_ELIGIBLE' || (e.status === 422 && /allow ?list|not eligible|not on the/i.test(msg))) {
+      // OpenSea names the stage and often says when the public stage opens: pass that on.
+      const stage = msg.match(/active drop stage, '([^']+)'/i)?.[1];
+      const publicAt = msg.match(/public stage opens at (\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/i);
+      return {
+        outcome: OUTCOME.TERMINAL,
+        ineligible: true,
+        userReason: `This wallet is not on the allowlist (eligible list) for the current stage${stage ? ` ("${stage}")` : ''}, so it cannot mint in it. Nothing was sent.${publicAt ? ` The public stage opens at ${publicAt[1]} ${publicAt[2]} UTC, when any wallet can mint: schedule again for that time.` : ' Use a wallet that is on the list, or check the stage requirements on the project page.'}`
+      };
+    }
+    // OpenSea words "limit reached" and "minted out" as one message, so the caller tells them apart with a supply read.
+    if (code === 'MINT_LIMIT_EXCEEDED' || code === 'SUPPLY_EXHAUSTED' || (e.status === 422 && /cannot mint any more|reached its limit|minted out/i.test(msg))) {
+      return { outcome: OUTCOME.TERMINAL, limitOrSoldOut: true, userReason: 'This wallet cannot mint any more from this drop: it has reached its limit for the stage, or the drop is minted out. Nothing was sent. If you already minted from this wallet yourself, that counts toward the limit.' };
+    }
     if (OPENSEA_TERMINAL.has(code) || (e.status >= 400 && e.status < 500)) return { outcome: OUTCOME.TERMINAL, userReason: e.message };
     return { outcome: OUTCOME.RETRY, userReason: 'OpenSea request failed; retrying.', retryAfterSec: e.retryAfterSec };
   }
