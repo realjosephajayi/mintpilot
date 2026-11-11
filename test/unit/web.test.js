@@ -41,6 +41,17 @@ test('serves the import and dashboard pages with strict security headers; health
   await w.close();
 });
 
+test('the bare web address shows a friendly front page instead of "Not found"', async () => {
+  const w = await boot();
+  const res = await fetch(`${w.base}/`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  const html = await res.text();
+  assert.match(html, /Automatic NFT minting/);
+  assert.doesNotMatch(html, /__BOT_URL__|__CTA_CLASS__/);
+  await w.close();
+});
+
 test('manual-signing and legacy smart-account routes no longer exist', async () => {
   const w = await boot();
   for (const p of ['/mint', '/connect', '/authorize', '/assets/wallet.js', '/assets/wallet-appkit.js', '/api/mint/prepare?s=x', '/api/appkit/config', '/api/policy/prepare?s=x']) {

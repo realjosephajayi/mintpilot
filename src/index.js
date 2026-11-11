@@ -47,6 +47,7 @@ async function main() {
   let poller = null;
   let worker = null;
   let server = null;
+  let botUsername = process.env.BOT_USERNAME || ''; // set from getMe() once the bot is up; used for the landing-page button
   const sweepers = [];
 
   if (roles.has('bot')) {
@@ -75,6 +76,7 @@ async function main() {
     };
     poller = createPoller({ tg, db, handler, log: console, onError, maxConcurrent: cfg.bot.maxConcurrentUpdates });
     console.log(`Bot @${me.username} ready.`);
+    botUsername = me.username;
     if (process.env.ADMIN_STARTUP_NOTICE !== 'false') {
       let version = '?';
       try { version = require('../package.json').version; } catch { /* optional */ }
@@ -92,7 +94,7 @@ async function main() {
       return verifyWalletSignature({ ...args, provider });
     };
     const notify = (id, text) => tg.sendMessage(id, text);
-    server = createWebServer({ db, cfg, verifySignature, notify, health });
+    server = createWebServer({ db, cfg, verifySignature, notify, health, getBotUsername: () => botUsername });
     server.listen(cfg.port, () => console.log(`Web listening on :${cfg.port} (${cfg.publicUrl})`));
   }
   if (poller) poller.run();

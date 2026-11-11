@@ -190,3 +190,8 @@ button.filter[aria-pressed="true"] { color: var(--green); background: rgba(90,22
 body[data-page="dashboard"] td[data-label="ID"], body[data-page="dashboard"] td[data-label="Mint"] { white-space: nowrap; }
 body[data-page="dashboard"] td a { color: var(--green); text-decoration: none; }
 body[data-page="dashboard"] td a:hover { text-decoration: underline; }
+
+/* Landing page */
+.cta { display: inline-block; margin-top: 18px; padding: 12px 22px; border-radius: 12px; background: var(--green); color: #04110a; font-weight: 700; text-decoration: none; }
+.cta:hover { filter: brightness(1.08); }
+body[data-page="dashboard"] .overview-stat p { margin: 8px 0 0; color: var(--muted); font-size: .92rem; line-height: 1.45; }

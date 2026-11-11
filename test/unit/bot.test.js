@@ -369,7 +369,7 @@ const buttons = (m) => (m.args[2]?.reply_markup?.inline_keyboard || []).flat();
 const callbacks = (m) => buttons(m).map((x) => x.callback_data);
 
 test('the Telegram command menu lists seven commands and every one is handled', async () => {
-  assert.deepEqual(COMMANDS.map((c) => c.command), ['start', 'schedule', 'mints', 'wallets', 'dashboard', 'timezone', 'support', 'help']);
+  assert.deepEqual(COMMANDS.map((c) => c.command), ['start', 'schedule', 'mints', 'wallets', 'dashboard', 'summary', 'timezone', 'support', 'help']);
   const b = boot({ rpc: rpcOk });
   for (const c of COMMANDS) { await b.msg(1, `/${c.command}`); assert.doesNotMatch(b.tg.last().args[1], /Unknown command/, c.command); }
 });
@@ -381,7 +381,7 @@ test('/start is a short welcome with the wallet address and a six-button menu', 
   assert.match(m.args[1], /Schedule a mint/);
   assert.match(m.args[1], /custodial/);
   assert.ok(m.args[1].split('\n').filter(Boolean).length <= 12, 'welcome stays short');
-  assert.deepEqual(callbacks(m), ['m:schedule', 'm:list', 'm:wallets', 'm:dashboard', 'm:plan', 'm:tz']);
+  assert.deepEqual(callbacks(m), ['m:schedule', 'm:list', 'm:wallets', 'm:dashboard', 'm:plan', 'm:tz', 'm:help']);
 });
 
 test('/mints and the older /myschedules show the same list, with Check and Cancel on each open mint', async () => {
@@ -411,7 +411,7 @@ test('the Plan button shows the plan, the invite link and an upgrade button that
   const m = b.tg.last();
   assert.match(m.args[1], /Free/);
   assert.match(m.args[1], new RegExp(`start=ref_${getUser(b.db, 1).ref_code}`));
-  assert.deepEqual(callbacks(m), ['m:upgrade', 'm:home']);
+  assert.deepEqual(callbacks(m), ['m:upgrade', 'm:referral', 'm:home']);
   await b.cb(1, 'm:upgrade');
   assert.ok(b.tg.calls.some((c) => c.method === 'sendInvoice'));
 });
@@ -758,7 +758,7 @@ test('"‹ Menu" turns any screen back into the home screen in place', async () 
   assert.match(edits(b).at(-1).args[2], /Plans/);
   await cbm(b, 1, 'm:home', 41);
   assert.match(edits(b).at(-1).args[2], /Welcome to MintPilot/);
-  assert.deepEqual(keysOf(edits(b).at(-1).args[3]), ['m:schedule', 'm:list', 'm:wallets', 'm:dashboard', 'm:plan', 'm:tz']);
+  assert.deepEqual(keysOf(edits(b).at(-1).args[3]), ['m:schedule', 'm:list', 'm:wallets', 'm:dashboard', 'm:plan', 'm:tz', 'm:help']);
 });
 
 test('the whole bot can be used from one message: the menu, every screen and the wizard', async () => {
@@ -1112,4 +1112,15 @@ test('health: admin-only status card', async () => {
   await b.msg(999, '/health');
   assert.match(b.tg.last().args[1], /MintPilot health/);
   assert.match(b.tg.last().args[1], /Users: 2/);
+});
+
+test('summary: a new user sees a friendly empty state, and the Help and Support buttons are connected', async () => {
+  const b = boot(); await b.msg(1, '/start');
+  await b.msg(1, '/summary');
+  assert.match(b.tg.last().args[1], /Your MintPilot summary/);
+  assert.match(b.tg.last().args[1], /Nothing scheduled yet/);
+  await b.cb(1, 'm:help');
+  assert.match(b.tg.last().args[1], /How MintPilot works/);
+  await b.cb(1, 'm:support');
+  assert.match(b.tg.last().args[1], /Contact support|Support is not set up/);
 });

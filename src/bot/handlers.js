@@ -9,7 +9,7 @@ const { addTrackedTx, TrackError, HASH_RE } = require('../core/tracking');
 const { invoiceFor, validatePreCheckout, recordPayment } = require('../core/payments');
 const { PRESETS, byId, totalWei } = require('../core/presets');
 const { ensurePlatformWalletAsync } = require('../core/custodialWallets');
-const { checkEligibility } = require('../core/eligibility');
+const { checkEligibility, loadEligibilityFile } = require('../core/eligibility');
 const { createDashboardSession } = require('../core/dashboard');
 const { checkMintReadiness } = require('../core/readiness');
 const { runPreflight } = require('../core/preflight');
@@ -34,7 +34,9 @@ const COMMANDS = [
   { command: 'mints', description: 'Your scheduled mints' },
   { command: 'wallets', description: 'Your wallets and balances' },
   { command: 'dashboard', description: 'Open your dashboard' },
+  { command: 'summary', description: 'Your mints at a glance' },
   { command: 'timezone', description: 'Set your time zone' },
+  { command: 'support', description: 'Contact support' },
   { command: 'help', description: 'How MintPilot works' }
 ];
 
@@ -78,12 +80,13 @@ const withMenu = (rows = []) => kb([...rows, [MENU_BTN]]);
 const MINTS_PER_PAGE = 5;
 const BALANCE_CHECK_MS = 4000; // the confirm screen never waits longer than this for a balance
 
-function menu() {
+function menu(extraTop = []) {
   return kb([
+    ...extraTop,
     [{ text: 'Schedule a mint', callback_data: 'm:schedule' }],
     [{ text: 'My mints', callback_data: 'm:list' }, { text: 'Wallets', callback_data: 'm:wallets' }],
     [{ text: 'Dashboard', callback_data: 'm:dashboard' }, { text: 'Plan', callback_data: 'm:plan' }],
-    [{ text: 'Time zone', callback_data: 'm:tz' }]
+    [{ text: 'Time zone', callback_data: 'm:tz' }, { text: 'Help', callback_data: 'm:help' }]
   ]);
 }
 
@@ -211,7 +214,7 @@ function createBotHandlers(ctx) {
   }
 
   async function cmdHelp(chatId) {
-    await screen(chatId, `<b>How MintPilot works</b>\nYou schedule a mint and MintPilot signs and sends it automatically from your wallet. There is nothing for you to sign.\n\n<b>Commands</b>\n/schedule — set up a mint\n/mints — see, check or cancel your mints\n/wallets — your address and balances\n/dashboard — a private view of your activity on the web\n/cancel — stop the current setup\n\n<b>Before a mint</b>\nKeep enough ETH in your wallet for the mint price plus network fees, on the network you chose.\n\n<b>Networks</b>: ${esc(networkList())}\n\nAdvanced: /track &lt;network&gt; &lt;txHash&gt; follows a transaction, and /check &lt;address&gt; looks an address up in the allowlist file.\n\n🔒 Never send a private key or recovery phrase in Telegram.`, menu());
+    await screen(chatId, `<b>How MintPilot works</b>\nYou schedule a mint and MintPilot signs and sends it automatically from your wallet. There is nothing for you to sign.\n\n<b>Commands</b>\n/schedule — set up a mint\n/mints — see, check or cancel your mints\n/wallets — your address and balances\n/dashboard — a private view of your activity on the web\n/summary — your mints at a glance\n/support — talk to us\n/cancel — stop the current setup\n\n<b>Before a mint</b>\nKeep enough ETH in your wallet for the mint price plus network fees, on the network you chose.\n\n<b>Networks</b>: ${esc(networkList())}\n\nAdvanced: /track &lt;network&gt; &lt;txHash&gt; follows a transaction, and /check &lt;address&gt; looks an address up in the allowlist file.\n\n🔒 Never send a private key or recovery phrase in Telegram.`, menu([[{ text: 'Contact support', callback_data: 'm:support' }]]));
   }
 
 
@@ -333,6 +336,9 @@ function createBotHandlers(ctx) {
   async function cmdCheck(chatId, args) {
     if (args.length !== 1) return say(chatId, 'Usage: <code>/check &lt;walletAddress&gt;</code>');
     try {
+      let loaded = null;
+      try { loaded = loadEligibilityFile(cfg.eligibilityFile); } catch { loaded = null; }
+      if (loaded && loaded.size === 0) return say(chatId, 'No allowlist is loaded on this bot, so there is nothing to check an address against. Ask the project for its official allowlist checker.');
       const result = checkEligibility(args[0], cfg.eligibilityFile);
       return say(chatId, result.listed
         ? `✅ <code>${result.address}</code> is eligible to mint according to the current allowlist file.`
@@ -361,7 +367,19 @@ function createBotHandlers(ctx) {
     const premium = planOf(u, now()) === 'premium';
     const link = `https://t.me/${ctx.botUsername}?start=ref_${u.ref_code}`;
     await screen(chatId, `${planText(from)}\n\n<b>Invite friends</b>\nYou get <b>${cfg.referral.referrerDays} days</b> of Premium when a friend you invite links a wallet with some on-chain history.\n<code>${link}</code>`,
-      withMenu([[{ text: premium ? `Add ${cfg.premium.days} more days · ${cfg.premium.priceStars} ⭐` : `Get Premium · ${cfg.premium.priceStars} ⭐`, callback_data: 'm:upgrade' }]]));
+      withMenu([[{ text: premium ? `Add ${cfg.premium.days} more days · ${cfg.premium.priceStars} ⭐` : `Get Premium · ${cfg.premium.priceStars} ⭐`, callback_data: 'm:upgrade' }], [{ text: 'Invite friends', callback_data: 'm:referral' }]]));
+  }
+
+
+  async function cmdSummary(chatId, from) {
+    const t = now(); const weekAgo = t - 7 * 86400;
+    const one = (sql, ...p) => db.prepare(sql).get(from.id, ...p);
+    const all = one("SELECT COUNT(*) n, COALESCE(SUM(quantity), 0) nfts FROM schedules WHERE telegram_id=? AND status='confirmed'");
+    const week = one("SELECT COUNT(*) n FROM schedules WHERE telegram_id=? AND status='confirmed' AND scheduled_at>?", weekAgo);
+    const missed = one("SELECT COUNT(*) n FROM schedules WHERE telegram_id=? AND status IN ('failed','expired') AND scheduled_at>?", weekAgo);
+    const next = one("SELECT COUNT(*) n, MIN(scheduled_at) next_at FROM schedules WHERE telegram_id=? AND status IN ('scheduled','ready')");
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    await screen(chatId, `📊 <b>Your MintPilot summary</b>\n\n<b>Last 7 days</b>\n✅ ${plural(week.n, 'mint')} confirmed\n${missed.n ? `⚠️ ${plural(missed.n, 'mint')} did not go through\n` : ''}\n<b>All time</b>\n🎯 ${plural(all.n, 'mint')} · ${plural(all.nfts, 'NFT')}\n\n<b>Coming up</b>\n${next.n ? `⏳ ${plural(next.n, 'mint')} scheduled, the next one on ${fmt(next.next_at, from.id)}` : 'Nothing scheduled yet. Tap Schedule a mint to set one up.'}`, withMenu([[{ text: 'My mints', callback_data: 'm:list' }]]));
   }
 
   async function cmdPremium(chatId, from) {
@@ -395,6 +413,78 @@ function createBotHandlers(ctx) {
     const t = now();
     const c = (sql, ...p) => db.prepare(sql).get(...p).n;
     await say(chatId, `Users: ${c('SELECT COUNT(*) n FROM users')}\nPremium: ${c('SELECT COUNT(*) n FROM users WHERE premium_until>?', t)}\nWallets: ${c('SELECT COUNT(*) n FROM wallets')}\nActive schedules: ${c("SELECT COUNT(*) n FROM schedules WHERE status IN ('scheduled','ready')")}\nStars received: ${c('SELECT COALESCE(SUM(amount),0) n FROM payments')}`);
+  }
+
+
+  // ───────── support & admin tools ─────────
+  const ANNOUNCE_MAX = 3000;
+  const adminTextOf = (raw) => String(raw || '').replace(/^\/\w+(?:@\w+)?\s*/, '').trim();
+
+  async function cmdSupport(chatId, from) {
+    if (!cfg.adminIds.length) return say(chatId, 'Support is not set up on this bot yet. Please try again later.', menu());
+    setState(db, from.id, 'support.msg', {}, now());
+    return say(chatId, '💬 <b>Contact support</b>\nTell us what you need in one message: what you were doing, what went wrong, and the mint number (like #3) if it is about a schedule.\n\n🔒 Never include a private key or recovery phrase.\nSend /cancel to stop.');
+  }
+  async function sendSupportMessage(chatId, from, text) {
+    const body = text.trim();
+    if (body.length < 5) return warn(chatId, 'Please add a few more details so we can help.');
+    if (body.length > 1500) return warn(chatId, 'That is a bit long. Please keep it under 1500 characters.');
+    clearState(db, from.id);
+    const who = from.username ? `@${esc(from.username)}` : esc([from.first_name, from.last_name].filter(Boolean).join(' ') || 'a user');
+    await Promise.all(cfg.adminIds.map((id) => tg.sendMessage(id, `📩 <b>Support message</b>\nFrom ${who} (<code>${from.id}</code>)\n\n${esc(body)}\n\nReply with: <code>/reply ${from.id} your message</code>`).catch(() => {})));
+    return say(chatId, '✅ Thanks! We have your message and will reply here as soon as we can.', menu());
+  }
+  async function cmdReply(chatId, from, raw) {
+    if (!isAdmin(from.id)) return;
+    const m = adminTextOf(raw).match(/^(\d+)\s+([\s\S]+)$/);
+    if (!m || !getUser(db, m[1])) return say(chatId, 'Usage: /reply &lt;telegramId&gt; &lt;message&gt; (the user must have started the bot)');
+    try {
+      await tg.sendMessage(m[1], `💬 <b>MintPilot support</b>\n${esc(m[2].slice(0, 3000))}`);
+      return say(chatId, '✅ Sent.');
+    } catch { return say(chatId, 'Could not deliver that message. The user may have blocked the bot.'); }
+  }
+  async function cmdAnnounce(chatId, from, raw) {
+    if (!isAdmin(from.id)) return;
+    const text = adminTextOf(raw);
+    if (!text) return say(chatId, 'Usage: /announce &lt;message&gt;\nI will show you a preview and ask before sending it to every user. The message is sent as plain text.');
+    if (text.length > ANNOUNCE_MAX) return say(chatId, `That is too long. Keep announcements under ${ANNOUNCE_MAX} characters.`);
+    const n = db.prepare('SELECT COUNT(*) n FROM users WHERE blocked_bot=0 AND banned=0').get().n;
+    setState(db, from.id, 'admin.announce', { text }, now());
+    return say(chatId, `📣 <b>Preview</b>\n\n${announcementBody(text)}\n\nSend this to <b>${n}</b> user${n === 1 ? '' : 's'}?`,
+      kb([[{ text: `Send to ${n}`, callback_data: 'ann:send' }, { text: 'Cancel', callback_data: 'ann:no' }]]));
+  }
+  const announcementBody = (text) => `📣 <b>MintPilot update</b>\n\n${esc(text)}`;
+  async function sendAnnouncement(chatId, text) {
+    const rows = db.prepare('SELECT telegram_id FROM users WHERE blocked_bot=0 AND banned=0').all();
+    await say(chatId, `Sending to ${rows.length} user${rows.length === 1 ? '' : 's'}…`);
+    let sent = 0; let failed = 0;
+    for (const r of rows) {
+      try { await tg.sendMessage(r.telegram_id, announcementBody(text)); sent += 1; }
+      catch (e) { failed += 1; if (e?.blocked) db.prepare('UPDATE users SET blocked_bot=1 WHERE telegram_id=?').run(r.telegram_id); }
+    }
+    return say(chatId, `✅ Announcement sent to ${sent} user${sent === 1 ? '' : 's'}${failed ? ` (${failed} could not be reached)` : ''}.`);
+  }
+  async function cmdHealth(chatId, from) {
+    if (!isAdmin(from.id)) return;
+    const t = now();
+    const c = (sql, ...p) => db.prepare(sql).get(...p).n;
+    let version = '?';
+    try { version = require('../../package.json').version; } catch { /* optional */ }
+    const a = cfg.automation;
+    const mode = !a.enabled ? 'automation off' : (a.dryRun ? '🧪 dry-run (nothing is signed)' : '🔴 LIVE signing');
+    const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+    const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    const storage = onRailway ? (volume ? `✅ Railway volume at <code>${esc(volume)}</code>` : '⚠️ <b>No Railway volume detected</b>: data is lost on every redeploy') : 'local disk';
+    const warnings = [];
+    if (!cfg.openSeaApiKey) warnings.push('OPENSEA_API_KEY is not set, so OpenSea mints and lookups are off.');
+    if (!a.encryptionKey) warnings.push('AUTOMATION_MASTER_KEY is missing, so wallets cannot be signed.');
+    if (onRailway && cfg.trustProxyHops !== 1) warnings.push(`TRUST_PROXY_HOPS is ${cfg.trustProxyHops}; on Railway it should be 1.`);
+    if (onRailway && cfg.clientIpHeader) warnings.push('CLIENT_IP_HEADER is set; on Railway leave it empty.');
+    const single = Object.values(chains).filter((x) => x.rpcUrls.length < 2).map((x) => x.key);
+    if (single.length) warnings.push(`Only one RPC on: ${single.join(', ')}.`);
+    const up = Math.floor(process.uptime());
+    const uptime = up >= 3600 ? `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m` : `${Math.floor(up / 60)}m ${up % 60}s`;
+    await say(chatId, `<b>MintPilot health</b> · v${esc(version)}\nUptime: ${uptime}\nMode: ${mode}\nStorage: ${storage}\n\nUsers: ${c('SELECT COUNT(*) n FROM users')} (${c('SELECT COUNT(*) n FROM users WHERE premium_until>?', t)} premium)\nWallets: ${c('SELECT COUNT(*) n FROM wallets')}\nActive schedules: ${c("SELECT COUNT(*) n FROM schedules WHERE status IN ('scheduled','ready')")}\nLast 24h: ${c("SELECT COUNT(*) n FROM schedules WHERE status='confirmed' AND scheduled_at>?", t - 86400)} confirmed, ${c("SELECT COUNT(*) n FROM schedules WHERE status='failed' AND scheduled_at>?", t - 86400)} failed\nOpenSea API: ${cfg.openSeaApiKey ? '✅ configured' : '❌ not set'}${warnings.length ? `\n\n⚠️ <b>Needs attention</b>\n${warnings.map((w) => `• ${esc(w)}`).join('\n')}` : '\n\n✅ No configuration warnings.'}`);
   }
 
   // ───────── /schedule wizard ─────────
@@ -486,6 +576,7 @@ function createBotHandlers(ctx) {
   }
 
   async function prepareOpenSeaCollection(chatId, d, slug, expectedContract = null) {
+    tg.sendChatAction?.(chatId, 'typing')?.catch(() => {});
     if (!openSeaChainFor(d.chain)) return warn(chatId, `OpenSea collection lookup is not available on ${esc(chainName(d.chain))}.`);
     if (!cfg.openSeaApiKey) return warn(chatId, 'Collection lookup is not enabled on this bot yet. Enter the contract address to use the standard mint setup.');
     try {
@@ -550,7 +641,7 @@ function createBotHandlers(ctx) {
         const phase = nowSec < d.startTime ? `starts ${fmt(d.startTime, chatId)}` : nowSec <= d.endTime ? 'LIVE' : 'ended';
         return [{ text: `SeaDrop ${i + 1} · ${phase} · ${formatWei(BigInt(d.mintPrice))} ETH`, callback_data: `sd:${i}` }];
       });
-      drops.push([{ text: 'OpenSea REST · SeaDrop V1', callback_data: 'a:opensea-drop' }]);
+      drops.push([{ text: 'Mint through OpenSea', callback_data: 'a:opensea-drop' }]);
       if (drops.length === 1) return wiz(chatId, intro + '<b>SeaDrop detected</b>\nNo readable public drop is configured on the authorized SeaDrop routers. You can still use OpenSea REST for an eligible SeaDrop V1 stage.', nav('sched.preset', drops));
       return wiz(chatId, intro + '<b>SeaDrop public drop detected</b>\nChoose the router/drop configuration to inspect and schedule. MintPilot will use the live on-chain price, time window, wallet cap, and fee rules.', nav('sched.preset', drops));
     }
@@ -577,7 +668,7 @@ function createBotHandlers(ctx) {
     const rows = chunk(available.map((p) => ({ text: menuLabels[p.id] || p.label, callback_data: `p:${PRESETS.indexOf(p)}` })), 2);
     rows.push([{ text: 'Merkle / allowlist mint', callback_data: 'a:merkle' }, { text: 'Signature-gated mint', callback_data: 'a:signature' }]);
     rows.push([{ text: 'SeaDrop signed mint', callback_data: 'a:seadrop-signed' }]);
-    rows.push([{ text: 'OpenSea REST · SeaDrop V1', callback_data: 'a:opensea-drop' }]);
+    rows.push([{ text: 'Mint through OpenSea', callback_data: 'a:opensea-drop' }]);
     rows.push([{ text: 'Token-gated mint', callback_data: 'a:token' }]);
     await wiz(chatId, intro + `Choose the mint method supported by the collection.${protocol}${detected}\n\nUse the project's official mint instructions if you are unsure; do not guess. MintPilot only offers supported methods and checks the transaction before signing.`, nav('sched.preset', rows));
   }
@@ -724,7 +815,7 @@ function createBotHandlers(ctx) {
     setState(db, from.id, 'sched.confirm', d, now());
     const isOpenSeaDrop = d.preset === 'adapter:opensea-drop';
     const isThirdweb = d.preset === 'adapter:thirdweb-drop';
-    const p = isOpenSeaDrop ? { label: 'OpenSea REST · SeaDrop V1', usesQuantity: true } : (d.preset === 'seadrop' ? { label: 'SeaDrop public mint', usesQuantity: true } : (isThirdweb ? { label: `thirdweb claim (${d.mintSpec.standard === 'erc1155' ? 'ERC-1155' : 'ERC-721'})`, usesQuantity: true } : (d.preset?.startsWith('adapter:') ? { label: `${d.mintSpec.adapter} eligibility mint`, usesQuantity: true } : byId(d.preset))));
+    const p = isOpenSeaDrop ? { label: 'Mint through OpenSea', usesQuantity: true } : (d.preset === 'seadrop' ? { label: 'SeaDrop public mint', usesQuantity: true } : (isThirdweb ? { label: `thirdweb claim (${d.mintSpec.standard === 'erc1155' ? 'ERC-1155' : 'ERC-721'})`, usesQuantity: true } : (d.preset?.startsWith('adapter:') ? { label: `${d.mintSpec.adapter} eligibility mint`, usesQuantity: true } : byId(d.preset))));
     const total = d.preset === 'seadrop' ? BigInt(d.mintSpec.mintPrice) * BigInt(d.quantity) : (d.preset?.startsWith('adapter:') ? BigInt(d.priceWei) * BigInt(d.quantity) : totalWei(d.preset, BigInt(d.priceWei), d.quantity));
     // For OpenSea the typed number is only a ceiling. Check funds against the listed price (or the fee alone when no price is listed).
     const listedPrice = isOpenSeaDrop && /^\d+$/.test(String(d.osSuggestedPriceWei ?? '')) ? BigInt(d.osSuggestedPriceWei) : null;
@@ -826,6 +917,7 @@ function createBotHandlers(ctx) {
           d.quantity = quantity;
           return askOpenSeaPriceCap(chatId, d);
         }
+        case 'support.msg': return sendSupportMessage(chatId, from, text);
         case 'sched.osPrice': {
           const priceWei = parseEth(text.trim().replace(/\s*eth$/i, ''));
           return acceptOpenSeaPriceCap(chatId, d, priceWei);
@@ -997,6 +1089,11 @@ function createBotHandlers(ctx) {
       d.quantity = quantity;
       return askOpenSeaPriceCap(chatId, d);
     }
+    if (st.state === 'admin.announce' && (data === 'ann:send' || data === 'ann:no')) {
+      clearState(db, from.id);
+      if (!isAdmin(from.id)) return;
+      return data === 'ann:send' ? sendAnnouncement(chatId, d.text) : say(chatId, 'Announcement cancelled.');
+    }
     if (st.state === 'sched.osPrice' && data === 'oscap:free') return acceptOpenSeaPriceCap(chatId, d, 0n);
     if (st.state === 'sched.osPrice' && data === 'oscap:public' && /^\d+$/.test(String(d.osSuggestedPriceWei ?? ''))) {
       return acceptOpenSeaPriceCap(chatId, d, BigInt(d.osSuggestedPriceWei));
@@ -1142,6 +1239,7 @@ function createBotHandlers(ctx) {
         case 'm:premium': return cmdPremium(chatId, from);
         case 'm:referral': return cmdReferral(chatId, from);
         case 'm:plans': return cmdPlans(chatId, from);
+        case 'm:support': return cmdSupport(chatId, from);
       }
       return;
     }
@@ -1222,6 +1320,11 @@ function createBotHandlers(ctx) {
         case 'grant': return cmdGrant(chatId, from, args);
         case 'revoke': return cmdRevoke(chatId, from, args);
         case 'stats': return cmdStats(chatId, from);
+        case 'health': return cmdHealth(chatId, from);
+        case 'announce': return cmdAnnounce(chatId, from, text);
+        case 'reply': return cmdReply(chatId, from, text);
+        case 'support': return cmdSupport(chatId, from);
+        case 'summary': return cmdSummary(chatId, from);
         case 'cancel': { const had = getState(db, from.id); clearState(db, from.id); if (had && await abortPane(chatId, menu())) return undefined; return say(chatId, had ? 'Cancelled.' : 'Nothing to cancel.'); }
         default: return say(chatId, 'Unknown command. Try /help.');
       }

@@ -48,7 +48,7 @@ function clientIp(req, trustProxyHops, trustedHeader = '') {
   return req.socket.remoteAddress || 'unknown';
 }
 
-function createWebServer({ db, cfg, verifySignature, notify, health = null, now = () => Math.floor(Date.now() / 1000), log = console }) {
+function createWebServer({ db, cfg, verifySignature, notify, health = null, getBotUsername = () => '', now = () => Math.floor(Date.now() / 1000), log = console }) {
   const limiter = createLimiter({ limit: 60, windowSec: 60, now });
   const sweeper = setInterval(() => limiter.sweep(), 60_000);
   if (sweeper.unref) sweeper.unref();
@@ -149,6 +149,13 @@ function createWebServer({ db, cfg, verifySignature, notify, health = null, now 
       }
       if (!limiter.allow(clientIp(req, cfg.trustProxyHops, cfg.clientIpHeader))) return fail(res, 429, 'Too many requests.');
 
+      if (req.method === 'GET' && url.pathname === '/') {
+        // A friendly front door instead of "Not found" for anyone who opens the bare web address.
+        const name = String(getBotUsername() || '').replace(/^@/, '');
+        const link = /^[A-Za-z0-9_]{4,32}$/.test(name) ? `https://t.me/${name}` : '';
+        const html = readFile('index.html').toString('utf8').replace('__BOT_URL__', link || '#').replace('__CTA_CLASS__', link ? 'cta' : 'cta hidden');
+        return send(res, 200, html, 'text/html; charset=utf-8');
+      }
       if (req.method === 'GET' && FILES[url.pathname]) return send(res, 200, readFile(FILES[url.pathname][0]), FILES[url.pathname][1]);
       if (req.method === 'GET' && url.pathname === '/api/dashboard') return await handleDashboard(res, url.searchParams.get('s'));
       if (req.method === 'GET' && url.pathname === '/api/link/challenge') {
