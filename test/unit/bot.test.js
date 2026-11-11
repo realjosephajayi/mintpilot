@@ -1124,3 +1124,17 @@ test('summary: a new user sees a friendly empty state, and the Help and Support 
   await b.cb(1, 'm:support');
   assert.match(b.tg.last().args[1], /Contact support|Support is not set up/);
 });
+
+test('summary counts the user\'s own mints (Telegram ids are stored as text)', async () => {
+  const b = boot(); await b.msg(1, '/start');
+  const add = (status, at, qty) => b.db.prepare('INSERT INTO schedules (telegram_id, chain, contract, preset, quantity, price_wei, total_wei, wallet_address, scheduled_at, created_at, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run('1', 'base', A(5), 'mint(uint256)', qty, '0', '0', A(1), at, T0, status);
+  add('confirmed', T0 - 86400, 2); add('confirmed', T0 - 86400 * 30, 1); add('failed', T0 - 3600, 1); add('scheduled', T0 + 3600, 1); add('submitted', T0 - 60, 1);
+  await b.msg(1, '/summary');
+  const text = b.tg.last().args[1];
+  assert.match(text, /1 mint confirmed/);
+  assert.match(text, /2 mints · 3 NFTs/);
+  assert.match(text, /1 mint did not go through/);
+  assert.match(text, /1 mint scheduled/);
+  assert.match(text, /1 mint sent, waiting for confirmation/);
+});

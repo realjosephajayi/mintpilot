@@ -373,13 +373,15 @@ function createBotHandlers(ctx) {
 
   async function cmdSummary(chatId, from) {
     const t = now(); const weekAgo = t - 7 * 86400;
-    const one = (sql, ...p) => db.prepare(sql).get(from.id, ...p);
+    // telegram_id is stored as TEXT, so the id must be bound as a string or nothing matches.
+    const one = (sql, ...p) => db.prepare(sql).get(String(from.id), ...p);
     const all = one("SELECT COUNT(*) n, COALESCE(SUM(quantity), 0) nfts FROM schedules WHERE telegram_id=? AND status='confirmed'");
     const week = one("SELECT COUNT(*) n FROM schedules WHERE telegram_id=? AND status='confirmed' AND scheduled_at>?", weekAgo);
     const missed = one("SELECT COUNT(*) n FROM schedules WHERE telegram_id=? AND status IN ('failed','expired') AND scheduled_at>?", weekAgo);
     const next = one("SELECT COUNT(*) n, MIN(scheduled_at) next_at FROM schedules WHERE telegram_id=? AND status IN ('scheduled','ready')");
+    const sent = one("SELECT COUNT(*) n FROM schedules WHERE telegram_id=? AND status='submitted'");
     const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-    await screen(chatId, `📊 <b>Your MintPilot summary</b>\n\n<b>Last 7 days</b>\n✅ ${plural(week.n, 'mint')} confirmed\n${missed.n ? `⚠️ ${plural(missed.n, 'mint')} did not go through\n` : ''}\n<b>All time</b>\n🎯 ${plural(all.n, 'mint')} · ${plural(all.nfts, 'NFT')}\n\n<b>Coming up</b>\n${next.n ? `⏳ ${plural(next.n, 'mint')} scheduled, the next one on ${fmt(next.next_at, from.id)}` : 'Nothing scheduled yet. Tap Schedule a mint to set one up.'}`, withMenu([[{ text: 'My mints', callback_data: 'm:list' }]]));
+    await screen(chatId, `📊 <b>Your MintPilot summary</b>\n\n<b>Last 7 days</b>\n✅ ${plural(week.n, 'mint')} confirmed\n${missed.n ? `⚠️ ${plural(missed.n, 'mint')} did not go through\n` : ''}\n<b>All time</b>\n🎯 ${plural(all.n, 'mint')} · ${plural(all.nfts, 'NFT')}\n\n<b>Coming up</b>\n${next.n ? `⏳ ${plural(next.n, 'mint')} scheduled, the next one on ${fmt(next.next_at, from.id)}` : 'Nothing scheduled yet. Tap Schedule a mint to set one up.'}${sent.n ? `\n📤 ${plural(sent.n, 'mint')} sent, waiting for confirmation` : ''}`, withMenu([[{ text: 'My mints', callback_data: 'm:list' }]]));
   }
 
   async function cmdPremium(chatId, from) {
