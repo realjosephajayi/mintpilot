@@ -259,6 +259,7 @@ function createLaunchEngine({
         continue;
       }
       if (r.outcome === OUTCOME.RETRY && inHot && (r.immediate ? immediate < MAX_FAST_RETRIES : transient < MAX_FAST_RETRIES)) {
+        log.warn?.('mint attempt will retry', { scheduleId: s.id, chain: s.chain, reason: r.userReason });
         if (r.immediate) immediate += 1;
         else {
           transient += 1;
