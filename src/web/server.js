@@ -15,6 +15,7 @@ const { getDashboardSession } = require('../core/dashboard');
 const { createLimiter } = require('../util/ratelimit');
 const { shortAddr } = require('../util/format');
 const { getChains } = require('../chains');
+const { renderLanding } = require('./landing');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FILES = {
@@ -23,7 +24,11 @@ const FILES = {
   '/assets/wallet-import.js': ['assets/wallet-import.js', 'text/javascript; charset=utf-8'],
   '/assets/dashboard.js': ['dashboard.js', 'text/javascript; charset=utf-8'],
   '/assets/app.css': ['app.css', 'text/css; charset=utf-8'],
-  '/assets/mintpilot-logo.webp': ['assets/mintpilot-logo.webp', 'image/webp']
+  '/assets/mintpilot-logo.webp': ['assets/mintpilot-logo.webp', 'image/webp'],
+  '/assets/mintpilot-mark.webp': ['assets/mintpilot-mark.webp', 'image/webp'],
+  '/favicon.ico': ['assets/mintpilot-mark.webp', 'image/webp'],
+  '/assets/site.css': ['site.css', 'text/css; charset=utf-8'],
+  '/assets/site.js': ['site.js', 'text/javascript; charset=utf-8']
 };
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
@@ -151,10 +156,14 @@ function createWebServer({ db, cfg, verifySignature, notify, health = null, getB
 
       if (req.method === 'GET' && url.pathname === '/') {
         // A friendly front door instead of "Not found" for anyone who opens the bare web address.
-        const name = String(getBotUsername() || '').replace(/^@/, '');
-        const link = /^[A-Za-z0-9_]{4,32}$/.test(name) ? `https://t.me/${name}` : '';
-        const html = readFile('index.html').toString('utf8').replace('__BOT_URL__', link || '#').replace('__CTA_CLASS__', link ? 'cta' : 'cta hidden');
+        let known = {};
+        try { known = getChains(cfg); } catch { /* the network list is optional */ }
+        const html = renderLanding(readFile('index.html').toString('utf8'), { cfg, chains: known, botUsername: getBotUsername() });
         return send(res, 200, html, 'text/html; charset=utf-8');
+      }
+      if (req.method === 'GET' && url.pathname === '/robots.txt') {
+        // Public pages may be indexed; personal links (dashboard, wallet import, API) must not be.
+        return send(res, 200, `User-agent: *\nAllow: /\nDisallow: /dashboard\nDisallow: /import\nDisallow: /api/\n`, 'text/plain; charset=utf-8');
       }
       if (req.method === 'GET' && FILES[url.pathname]) return send(res, 200, readFile(FILES[url.pathname][0]), FILES[url.pathname][1]);
       if (req.method === 'GET' && url.pathname === '/api/dashboard') return await handleDashboard(res, url.searchParams.get('s'));

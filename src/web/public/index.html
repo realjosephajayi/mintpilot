@@ -5,30 +5,292 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <meta name="theme-color" content="#050f19" />
-  <meta name="description" content="MintPilot mints NFTs for you automatically. Pick a collection, set a time, and it signs and sends the mint the moment it opens." />
-  <title>MintPilot · Automatic NFT minting</title>
-  <link rel="stylesheet" href="/assets/app.css" />
+  <title>MintPilot: automatic NFT minting from Telegram</title>
+  <meta name="description" content="Pick a collection and a time in Telegram. MintPilot signs and sends the mint from your wallet the moment it opens, then tells you exactly what happened." />
+  <link rel="canonical" href="__PUBLIC_URL__/" />
+  <link rel="icon" type="image/webp" href="/assets/mintpilot-mark.webp" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MintPilot" />
+  <meta property="og:title" content="MintPilot: automatic NFT minting from Telegram" />
+  <meta property="og:description" content="Set the time. MintPilot signs and sends the mint the moment it opens and reports the result." />
+  <meta property="og:url" content="__PUBLIC_URL__/" />
+  <meta property="og:image" content="__PUBLIC_URL__/assets/mintpilot-logo.webp" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/site.js" defer></script>
 </head>
-<body data-page="dashboard">
-<main>
-  <header class="hero">
-    <div class="hero-copy">
-      <h1>Automatic NFT minting</h1>
-      <p class="lead">Pick a collection, set a time, and MintPilot signs and sends the mint the moment it opens. No waiting up, no missed drops.</p>
-      <a class="__CTA_CLASS__" href="__BOT_URL__" rel="noopener noreferrer">Open MintPilot in Telegram</a>
-    </div>
-    <img class="hero-logo" src="/assets/mintpilot-logo.webp" alt="MintPilot" />
-  </header>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-limit" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l3 3M14 9l2 2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-phrase" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M6 8H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h12M9 5h10a1 1 0 0 1 1 1v8"/></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  </defs>
+</svg>
 
-  <section class="overview-strip" aria-label="How it works">
-    <article class="overview-stat"><span>1. Add funds</span><p>Send ETH to your MintPilot wallet on the network you want to mint on.</p></article>
-    <article class="overview-stat"><span>2. Schedule</span><p>Choose the collection, how many to mint and when.</p></article>
-    <article class="overview-stat"><span>3. Relax</span><p>MintPilot mints for you and messages you the result.</p></article>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="/" aria-label="MintPilot home">
+      <img src="/assets/mintpilot-mark.webp" alt="" width="36" height="36" />
+      <span class="wordmark"><span>Mint</span><span>Pilot</span></span>
+    </a>
+    <nav class="links" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#safety">Safety</a>
+      <a href="#networks">Networks</a>
+      <a href="#plans">Plans</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn-small" href="__BOT_URL__" rel="noopener noreferrer">Open MintPilot</a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1>Set the time. MintPilot does the minting.</h1>
+        <p class="lead">Pick a collection and a time in Telegram. MintPilot signs and sends the mint from your wallet the moment it opens, then tells you exactly what happened.</p>
+        <div class="actions">
+          <a class="btn" href="__BOT_URL__" rel="noopener noreferrer">Open MintPilot in Telegram</a>
+          <a class="btn btn-ghost" href="#how">See how it works</a>
+        </div>
+        <ul class="facts">
+          <li>Free to start. You pay only the mint price and network fees.</li>
+          <li>OpenSea drops and direct contract mints on __NETWORK_COUNT__ networks.</li>
+          <li>Runs on its own servers, so Telegram does not need to stay open.</li>
+        </ul>
+      </div>
+
+      <figure class="phone" aria-label="Example conversation with MintPilot">
+        <div class="phone-bar">
+          <img src="/assets/mintpilot-mark.webp" alt="" width="34" height="34" />
+          <div><strong>MintPilot</strong><span>bot</span></div>
+        </div>
+        <div class="chat" id="chat">
+          <div class="bubble" data-at="400">
+            <b>Mint #12 · Scheduled</b><br />
+            Network: Base<br />
+            When: Fri 14 Nov, 18:00 UTC (in 1h)<br />
+            Price limit: 0.02 ETH per wallet, plus network fee<br />
+            NFT contract: <code>0x8a2f…c41d</code>
+            <span class="time">16:58</span>
+          </div>
+          <div class="keys bubble" data-at="900" aria-hidden="true"><span>Check · #12</span><span>Cancel · #12</span></div>
+          <div class="bubble" data-at="2600">
+            🔔 <b>Automatic mint in ~10 min</b><br />
+            Schedule #12 · Base<br />
+            MintPilot signs automatically. Keep at least 0.02 ETH plus gas in this wallet on Base.
+            <span class="time">17:50</span>
+          </div>
+          <div class="typing" id="typing" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="bubble win" data-at="6200">
+            🎉 <b>Mint confirmed</b> on Base (block 31,204,118)<br />
+            NFT received: <b>#482</b><br />
+            <u>basescan.org/tx/0x91d7…3b0e</u>
+            <span class="time">18:00</span>
+          </div>
+        </div>
+      </figure>
+    </div>
   </section>
 
-  <footer class="dashboard-footer">
-    <p>MintPilot holds your wallet key so it can sign for you. Only add funds you can afford to lose. Never share a recovery phrase with anyone.</p>
-  </footer>
+  <section class="section" id="how">
+    <div class="wrap split">
+      <div class="split-head">
+        <h2>How it works</h2>
+        <p>You do the setup once. MintPilot handles the timing.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Add a funded wallet</h3>
+          <p>Create a MintPilot wallet or import your own, then send ETH to it on the network you want to mint on.</p>
+        </li>
+        <li>
+          <h3>Schedule the mint</h3>
+          <p>Send a contract address or an OpenSea link, choose how many NFTs and when. MintPilot checks the collection and warns you if it is sold out or your wallet is not on the allowlist.</p>
+        </li>
+        <li>
+          <h3>Get the result</h3>
+          <p>At the set time MintPilot signs and sends the transaction. You get a message with the outcome, the NFT IDs and a link to the transaction, or a plain explanation if it did not go through.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>What MintPilot does</h2>
+        <p>Everything between “I want that mint” and “it’s in my wallet”.</p>
+      </div>
+      <div class="features">
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg>
+          <h3>Sends at the right moment</h3>
+          <p>Transactions are prepared ahead of time and sent as a mint opens. If the first try lands early, MintPilot keeps checking and tries again the moment it opens.</p>
+        </article>
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-link"/></svg>
+          <h3>Handles the mints people use</h3>
+          <p>OpenSea drops, public mints and allowlist mints on supported contracts. Paste a collection link or a contract address.</p>
+        </article>
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-scan"/></svg>
+          <h3>Checks before it spends</h3>
+          <p>Sold-out collections and wallets that are not on the allowlist are flagged when you schedule or before a transaction is sent.</p>
+        </article>
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-limit"/></svg>
+          <h3>You set the price limit</h3>
+          <p>Choose the most you are willing to pay per NFT. MintPilot refuses to send a transaction above it.</p>
+        </article>
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-chat"/></svg>
+          <h3>Explains what happened</h3>
+          <p>Every result arrives in Telegram in plain language, with the NFT IDs and a link to the transaction.</p>
+        </article>
+        <article>
+          <svg class="ico" aria-hidden="true"><use href="#i-bars"/></svg>
+          <h3>A live view of your mints</h3>
+          <p>Open a private, view-only dashboard to see upcoming mints, past results and each attempt as it happens.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="safety">
+    <div class="wrap">
+      <div class="safety">
+        <div class="safety-head">
+          <h2>Built around your limits</h2>
+          <p>MintPilot signs transactions for you, so it treats your money carefully and tells you how.</p>
+        </div>
+        <ul class="safety-list">
+          <li>
+            <svg class="ico" aria-hidden="true"><use href="#i-cap"/></svg>
+            <div><h3>Spending limits</h3><p>A price limit you choose for each mint, plus a built-in cap on how much a single transaction can spend.</p></div>
+          </li>
+          <li>
+            <svg class="ico" aria-hidden="true"><use href="#i-key"/></svg>
+            <div><h3>Encrypted keys</h3><p>Wallet keys are encrypted at rest and used only to sign the mints you scheduled.</p></div>
+          </li>
+          <li>
+            <svg class="ico" aria-hidden="true"><use href="#i-phrase"/></svg>
+            <div><h3>No recovery phrase, ever</h3><p>MintPilot never asks for your seed phrase. Use a dedicated wallet and fund it only with what you plan to mint with.</p></div>
+          </li>
+          <li>
+            <svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg>
+            <div><h3>Private, expiring links</h3><p>Dashboard and wallet-import links are made just for you and expire after a short time.</p></div>
+          </li>
+        </ul>
+        <p class="fine">Treat a MintPilot wallet like any hot wallet. Minting is never guaranteed: the project’s contract, the network and the remaining supply decide the outcome.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="networks">
+    <div class="wrap split">
+      <div class="split-head">
+        <h2>Networks</h2>
+        <p>Mint on __NETWORK_COUNT__ networks, all paid for in ETH.</p>
+      </div>
+      <ul class="chips">__NETWORK_CHIPS__</ul>
+    </div>
+  </section>
+
+  <section class="section" id="plans">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Plans</h2>
+        <p>Start free. Upgrade when you mint often.</p>
+      </div>
+      <div class="plans">
+        <article class="plan">
+          <h3>Starter</h3>
+          <p class="price"><strong>Free</strong><span>no card, no sign-up beyond Telegram</span></p>
+          <ul class="ticks">__FREE_FEATURES__</ul>
+        </article>
+        <article class="plan plan-pro">
+          <h3>Premium</h3>
+          <p class="price"><strong>__PREMIUM_STARS__ Stars</strong><span>for __PREMIUM_DAYS__ days, paid inside Telegram</span></p>
+          <ul class="ticks">__PREMIUM_FEATURES__</ul>
+        </article>
+      </div>
+      <p class="center"><a class="btn" href="__BOT_URL__" rel="noopener noreferrer">Start free in Telegram</a></p>
+    </div>
+  </section>
+
+  <section class="section" id="faq">
+    <div class="wrap narrow">
+      <div class="section-head">
+        <h2>Questions</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Do I need to keep Telegram open?</summary>
+          <p>No. Once a mint is scheduled it runs on MintPilot’s servers. Telegram is only where you set things up and where the results arrive.</p>
+        </details>
+        <details>
+          <summary>What does it cost?</summary>
+          <p>MintPilot itself is free to start. Each mint costs the mint price plus the network fee, paid from your MintPilot wallet. Premium is optional and is paid with Telegram Stars.</p>
+        </details>
+        <details>
+          <summary>Can I use my own wallet?</summary>
+          <p>Yes. Import it through the private page the bot links to, or create a new wallet inside MintPilot. For either one, fund it only with what you plan to mint with.</p>
+        </details>
+        <details>
+          <summary>What if the collection sells out or I am not on the allowlist?</summary>
+          <p>MintPilot tells you in plain language. Sold-out collections are flagged when you schedule, and if a wallet is not eligible for the live stage nothing is sent and you are told why.</p>
+        </details>
+        <details>
+          <summary>Is a mint guaranteed?</summary>
+          <p>No. Speed helps, but the project’s contract, network congestion and the remaining supply decide who gets an NFT. MintPilot removes the manual timing, not the competition.</p>
+        </details>
+        <details>
+          <summary>Which collections work?</summary>
+          <p>OpenSea drops and mints on supported contracts across the networks listed above. If a collection does not work, send the details through /support in the bot and we will look at it.</p>
+        </details>
+        <details>
+          <summary>Where do I get help?</summary>
+          <p>Open the bot and send /support. Describe what you were doing and the mint number, and never include a private key or recovery phrase.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap cta-grid">
+      <div>
+        <h2>Schedule your next mint in a minute.</h2>
+        <p>Open MintPilot in Telegram, add a wallet and pick a collection.</p>
+        <p><a class="btn" href="__BOT_URL__" rel="noopener noreferrer">Open MintPilot in Telegram</a></p>
+      </div>
+      <img class="cta-art" src="/assets/mintpilot-logo.webp" alt="MintPilot, a helmeted pilot with a paper plane" width="384" height="287" loading="lazy" />
+    </div>
+  </section>
 </main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="/" aria-label="MintPilot home">
+      <img src="/assets/mintpilot-mark.webp" alt="" width="32" height="32" />
+      <span class="wordmark"><span>Mint</span><span>Pilot</span></span>
+    </a>
+    <p>MintPilot is a tool, not financial advice. Only mint with funds you can afford to lose.</p>
+    <p class="copy">© __YEAR__ MintPilot</p>
+  </div>
+</footer>
 </body>
 </html>

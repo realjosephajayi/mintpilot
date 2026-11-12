@@ -47,8 +47,12 @@ test('the bare web address shows a friendly front page instead of "Not found"', 
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /text\/html/);
   const html = await res.text();
-  assert.match(html, /Automatic NFT minting/);
-  assert.doesNotMatch(html, /__BOT_URL__|__CTA_CLASS__/);
+  assert.match(html, /MintPilot does the minting/);
+  assert.doesNotMatch(html, /__[A-Z_]{3,}__/, 'every page placeholder is filled in');
+  assert.equal((await fetch(`${w.base}/assets/site.css`)).status, 200);
+  assert.equal((await fetch(`${w.base}/assets/site.js`)).status, 200);
+  assert.equal((await fetch(`${w.base}/assets/mintpilot-mark.webp`)).status, 200);
+  assert.match(await (await fetch(`${w.base}/robots.txt`)).text(), /Disallow: \/dashboard/);
   await w.close();
 });
 
