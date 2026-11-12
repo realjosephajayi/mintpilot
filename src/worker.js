@@ -142,8 +142,6 @@ function createWorker({
         // "top up the wallet") polls every tick so a launch is never missed by minutes; a SeaDrop
         // NotActive revert names the stage start, so the next attempt is aimed exactly at it.
         const backoff = result.outcome === OUTCOME.RETRY || result.apiCost;
-        // Leave a trace of every deferral: without it a stalled mint is a mystery in the logs.
-        log.warn?.('mint attempt deferred', { scheduleId: s.id, chain: s.chain, outcome: result.outcome, attempts: s.attempts, reason: result.userReason });
         const nextAttemptAt = backoff ? t + backoffSec(s.attempts, result.retryAfterSec) : Math.max(t, Number(result.retryAt) || 0);
         deferSchedule(db, s.id, { nextAttemptAt, lastError: result.userReason || null, attempts: backoff ? 'increment' : 'reset' });
         if (result.inactive) notifyOnce(s, 'inactive', `⏳ ${label(s)}: OpenSea says this mint is not open yet, so nothing was sent.\nMintPilot keeps checking and goes ahead as soon as it opens, until ${utc(scheduleDeadline(s, maxWaitSec))}. If it sells out first, I will tell you.\nIf you set this time earlier than the real mint time, cancel it in /mints and schedule again for the real opening time.`, t);
