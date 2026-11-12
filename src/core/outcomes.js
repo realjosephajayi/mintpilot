@@ -169,4 +169,10 @@ function backoffSec(attempts, retryAfterSec = null) {
   return Math.max(base, Number(retryAfterSec) || 0);
 }
 
-module.exports = { OUTCOME, SEADROP_ERRORS, decodeSeaDropError, classifyRevert, notActiveStart, revertLabel, classifyPreparationError, classifyBroadcastError, backoffSec };
+/** OpenSea says how many are left when the request is too big: "…1 mint remains, counting both the supply and this wallet's limit". */
+function remainingFromMessage(message) {
+  const m = String(message || '').match(/(\d+)\s+mints?\s+remains?/i);
+  return m ? Number(m[1]) : null;
+}
+
+module.exports = { remainingFromMessage, OUTCOME, SEADROP_ERRORS, decodeSeaDropError, classifyRevert, notActiveStart, revertLabel, classifyPreparationError, classifyBroadcastError, backoffSec };

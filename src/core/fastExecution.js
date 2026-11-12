@@ -15,7 +15,7 @@
 const { Wallet, Transaction } = require('ethers');
 const { getCustodialPrivateKeyAsync } = require('./custodialWallets');
 const { resolveAndBuild, routerCheck, storedSpec } = require('./prepareMint');
-const { OUTCOME, classifyRevert, notActiveStart, revertLabel, classifyPreparationError, classifyBroadcastError } = require('./outcomes');
+const { OUTCOME, classifyRevert, notActiveStart, revertLabel, classifyPreparationError, classifyBroadcastError, remainingFromMessage } = require('./outcomes');
 const { gasLimitFor, gasCap } = require('./gasPolicy');
 const { feeFields, txFeeFields } = require('./feePolicy');
 const { fireAtMs, clockLagMs } = require('./launchTiming');
@@ -269,7 +269,7 @@ function createFastExecution({
     return sent;
   }
 
-  async function execute(schedule, { assertLock = () => true, chainTime = null, deadline = null } = {}) {
+  async function execute(schedule, { assertLock = () => true, chainTime = null, deadline = null, reducedOnce = false } = {}) {
     if (!db) return result(OUTCOME.TERMINAL, 'Execution database is unavailable.');
     const existing = openAttempt(schedule.id);
     if (existing) {
@@ -289,6 +289,20 @@ function createFastExecution({
         const out = await readMintedOut(rpc, schedule.chain, schedule.contract);
         if (out) return result(OUTCOME.TERMINAL, `This collection is minted out (${out.minted} / ${out.max}). There is nothing left to mint, so MintPilot stopped this schedule.`);
         return { ...classified, inactive: true };
+      }
+      // Fewer are left than were asked for (supply or this wallet's limit): mint what is left instead of nothing.
+      if (e?.name === 'OpenSeaApiError' && !reducedOnce) {
+        const left = remainingFromMessage(e.message);
+        const spec = storedSpec(schedule);
+        const asked = Number(spec?.quantity ?? schedule.quantity);
+        if (spec && typeof spec === 'object' && spec.adapter === 'opensea-drop' && left != null && left >= 1 && left < asked) {
+          const total = String(BigInt(spec.priceWei ?? schedule.price_wei ?? 0) * BigInt(left));
+          const reduced = { ...schedule, quantity: left, total_wei: total, mint_spec: JSON.stringify({ ...spec, quantity: left }) };
+          try { db.prepare('UPDATE schedules SET quantity=?, total_wei=?, mint_spec=? WHERE id=?').run(left, total, reduced.mint_spec, schedule.id); }
+          catch (err) { log.warn?.('could not save the reduced quantity', { scheduleId: schedule.id, error: err?.message }); }
+          const again = await execute(reduced, { assertLock, chainTime, deadline, reducedOnce: true });
+          return { ...again, reducedFrom: asked, reducedTo: left };
+        }
       }
       // "Limit reached" and "minted out" arrive as one OpenSea message: a supply read says which one it is.
       if (classified.limitOrSoldOut) {
