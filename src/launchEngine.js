@@ -263,6 +263,8 @@ function createLaunchEngine({
         if (r.immediate) immediate += 1;
         else {
           transient += 1;
+          // Do not leave the user guessing: after a few failed tries say so, once, and suggest a backup.
+          if (transient === 3) notifyOnce(s, 'rpc-trouble', `⚠️ Schedule #${s.id}: MintPilot is having trouble reaching ${chains[s.chain] ? chains[s.chain].name : s.chain} (${r.userReason}). It keeps retrying automatically. If this is a live mint, consider minting by hand as a backup.`);
           const pause = Math.max(Number(r.retryAfterSec || 0) * 1000, Math.min(2000, L.retryIntervalMs * 2 ** (transient - 1)));
           if (!await sleepFor(pause, ctx)) return;
         }
