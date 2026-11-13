@@ -13,7 +13,7 @@ const isPermanentReadFailure = (e) => {
  * getAllowedSeaDrop() list. A network failure while reading it is retryable; a contract that does not
  * publish the list, or an unlisted router, is not.
  */
-async function assertSeaDropRouterAuthorized(rpc, schedule, tx, { trustedRouters = [] } = {}) {
+async function assertSeaDropRouterAuthorized(rpc, schedule, tx, { trustedRouters = [], mode = 'lenient' } = {}) {
   if (!rpc || typeof rpc.getAllowedSeaDrop !== 'function') throw new Error('RPC layer does not expose SeaDrop authorization reads.');
   const target = String(tx?.to || tx?.target || '').toLowerCase();
   let allowed;
@@ -24,6 +24,16 @@ async function assertSeaDropRouterAuthorized(rpc, schedule, tx, { trustedRouters
       // collection's own contract (the one you scheduled) or a router the operator has trusted explicitly.
       const trusted = new Set([String(schedule.contract).toLowerCase(), ...trustedRouters.map((a) => String(a).toLowerCase())]);
       if (target && trusted.has(target)) return true;
+      if (mode !== 'strict' && target) {
+        // Nothing to check the destination against, so do what other snipers do and trust OpenSea's transaction:
+        // any deployed contract is accepted. The simulation (a reverting mint is never sent), the price ceiling and the
+        // per-transaction spending cap still protect the wallet.
+        let deployed = false;
+        try { deployed = typeof rpc.hasCode === 'function' ? await rpc.hasCode(schedule.chain, target) : false; }
+        catch (err) { err.retryable = true; throw err; }
+        if (deployed) return true;
+        throw new MintSpecError(`OpenSea's mint destination ${tx.to || tx.target} is not a contract on this network, so MintPilot did not send anything.`);
+      }
       throw new MintSpecError(`MintPilot cannot verify the mint route for this collection: OpenSea sends the mint to ${tx?.to || tx?.target || '(missing)'}, and the contract does not publish a SeaDrop authorization list to check it against. Nothing was sent. You can mint this one manually, or ask support to review the route.`);
     }
     e.retryable = true; throw e;

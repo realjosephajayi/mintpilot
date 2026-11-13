@@ -23,7 +23,7 @@ async function resolveAndBuild(schedule, { rpc, cfg, now, fetchImpl, buildMintTx
   const raw = storedSpec(schedule);
   const spec = raw ? await resolveMintSpec(raw, schedule, { now, cfg, fetchImpl }) : null;
   const tx = spec ? build({ ...schedule, mint_spec: JSON.stringify(spec), mintSpec: spec }) : build(schedule);
-  if (checkRouter) await routerCheck(rpc, schedule, spec, tx, { trustedRouters: cfg?.openSeaTrustedRouters });
+  if (checkRouter) await routerCheck(rpc, schedule, spec, tx, { trustedRouters: cfg?.openSeaTrustedRouters, mode: cfg?.openSeaRouterCheck });
   return { spec, tx };
 }
 

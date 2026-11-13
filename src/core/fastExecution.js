@@ -108,7 +108,7 @@ function createFastExecution({
     const tipOverridden = cfg.fees?.priorityFeeGwei?.[chain.key] !== undefined;
     const value = BigInt(tx.valueWei);
     const [router, simulation, estimate, balance, fees, nonce] = await Promise.allSettled([
-      routerCheck(rpc, schedule, spec, tx, { trustedRouters: cfg.openSeaTrustedRouters }),
+      routerCheck(rpc, schedule, spec, tx, { trustedRouters: cfg.openSeaTrustedRouters, mode: cfg.openSeaRouterCheck }),
       rpc.simulate(schedule.chain, tx),
       rpc.estimateGas(schedule.chain, { from: schedule.wallet_address, to: tx.to, data: tx.data, value }),
       rpc.getBalance(schedule.chain, schedule.wallet_address),
