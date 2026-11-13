@@ -13,15 +13,21 @@ const isPermanentReadFailure = (e) => {
  * getAllowedSeaDrop() list. A network failure while reading it is retryable; a contract that does not
  * publish the list, or an unlisted router, is not.
  */
-async function assertSeaDropRouterAuthorized(rpc, schedule, tx) {
+async function assertSeaDropRouterAuthorized(rpc, schedule, tx, { trustedRouters = [] } = {}) {
   if (!rpc || typeof rpc.getAllowedSeaDrop !== 'function') throw new Error('RPC layer does not expose SeaDrop authorization reads.');
+  const target = String(tx?.to || tx?.target || '').toLowerCase();
   let allowed;
   try { allowed = await rpc.getAllowedSeaDrop(schedule.chain, schedule.contract); }
   catch (e) {
-    if (isPermanentReadFailure(e)) throw new MintSpecError('This collection\'s contract does not publish a SeaDrop authorization list, so MintPilot cannot verify the mint route. Nothing was sent. You can mint this one manually.');
+    if (isPermanentReadFailure(e)) {
+      // Some drop contracts have no SeaDrop list at all. Accept only destinations MintPilot can vouch for: the
+      // collection's own contract (the one you scheduled) or a router the operator has trusted explicitly.
+      const trusted = new Set([String(schedule.contract).toLowerCase(), ...trustedRouters.map((a) => String(a).toLowerCase())]);
+      if (target && trusted.has(target)) return true;
+      throw new MintSpecError(`MintPilot cannot verify the mint route for this collection: OpenSea sends the mint to ${tx?.to || tx?.target || '(missing)'}, and the contract does not publish a SeaDrop authorization list to check it against. Nothing was sent. You can mint this one manually, or ask support to review the route.`);
+    }
     e.retryable = true; throw e;
   }
-  const target = String(tx?.to || tx?.target || '').toLowerCase();
   if (!Array.isArray(allowed) || !allowed.some((address) => String(address).toLowerCase() === target)) {
     throw new MintSpecError(`SeaDrop router ${tx?.to || tx?.target || '(missing)'} is not authorized by the scheduled NFT contract.`);
   }

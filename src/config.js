@@ -96,6 +96,9 @@ function loadConfig(env = process.env) {
   if (env.ERC1271_CHAIN && !knownChains.has(env.ERC1271_CHAIN)) throw new Error(`ERC1271_CHAIN must be a configured chain key (${[...knownChains].join(', ')}).`);
 
   const clientIpHeader = String(env.CLIENT_IP_HEADER || '').trim().toLowerCase();
+  // Mint routers the operator has checked by hand, for drop contracts that publish no SeaDrop authorization list.
+  const openSeaTrustedRouters = String(env.OPENSEA_TRUSTED_ROUTERS || '').split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const address of openSeaTrustedRouters) if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`OPENSEA_TRUSTED_ROUTERS contains an invalid address: ${address}`);
   if (clientIpHeader && !CLIENT_IP_HEADERS.has(clientIpHeader)) throw new Error(`CLIENT_IP_HEADER must be one of: ${[...CLIENT_IP_HEADERS].join(', ')}.`);
 
   // Removed settings. Testnets and the local node are gone; every configured chain is a mainnet.
@@ -126,6 +129,7 @@ function loadConfig(env = process.env) {
     adminIds: (env.ADMIN_TELEGRAM_IDS || '').split(',').map((s) => s.trim()).filter(Boolean),
     publicUrl: (env.PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, ''),
     openSeaApiKey: String(env.OPENSEA_API_KEY || '').trim(),
+    openSeaTrustedRouters,
     port: int('PORT', 3000, { max: 65535 }),
     trustProxyHops,
     dbPath: env.DATABASE_PATH || 'data/bot.sqlite',

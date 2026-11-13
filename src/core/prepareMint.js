@@ -15,15 +15,15 @@ function storedSpec(schedule) {
 }
 
 /** Resolves when the NFT contract lists the transaction's SeaDrop router (no-op for other routes). */
-async function routerCheck(rpc, schedule, spec, tx) {
-  if (spec && isSeaDropRoute(spec.adapter)) await assertSeaDropRouterAuthorized(rpc, schedule, tx);
+async function routerCheck(rpc, schedule, spec, tx, options = {}) {
+  if (spec && isSeaDropRoute(spec.adapter)) await assertSeaDropRouterAuthorized(rpc, schedule, tx, options);
 }
 
 async function resolveAndBuild(schedule, { rpc, cfg, now, fetchImpl, buildMintTx: build = buildMintTx, checkRouter = true } = {}) {
   const raw = storedSpec(schedule);
   const spec = raw ? await resolveMintSpec(raw, schedule, { now, cfg, fetchImpl }) : null;
   const tx = spec ? build({ ...schedule, mint_spec: JSON.stringify(spec), mintSpec: spec }) : build(schedule);
-  if (checkRouter) await routerCheck(rpc, schedule, spec, tx);
+  if (checkRouter) await routerCheck(rpc, schedule, spec, tx, { trustedRouters: cfg?.openSeaTrustedRouters });
   return { spec, tx };
 }
 
