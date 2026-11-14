@@ -2,7 +2,7 @@
 // "Minted out" detection: a collection whose totalSupply has reached its maxSupply has nothing left to mint.
 const { Interface } = require('ethers');
 
-const SUPPLY = new Interface(['function totalSupply() view returns (uint256)', 'function maxSupply() view returns (uint256)']);
+const SUPPLY = new Interface(['function totalSupply() view returns (uint256)', 'function maxSupply() view returns (uint256)', 'function balanceOf(address owner) view returns (uint256)']);
 const word = (v) => (typeof v === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(v) ? BigInt(v) : null);
 
 /** True when both numbers are known, a cap exists, and the minted count has reached it. */
@@ -22,6 +22,25 @@ async function readMintedOut(rpc, chain, address) {
   } catch { return null; }
 }
 
+/** How much of a collection is minted: { minted, max } as decimal strings, or null when either number cannot be read. */
+async function readSupply(rpc, chain, address) {
+  if (!rpc || typeof rpc.ethCall !== 'function') return null;
+  try {
+    const calls = ['totalSupply', 'maxSupply'].map((fn) => Promise.resolve(rpc.ethCall(chain, address, SUPPLY.encodeFunctionData(fn))).catch(() => null));
+    const [minted, max] = (await Promise.all(calls)).map(word);
+    return minted == null || max == null || max === 0n ? null : { minted: minted.toString(), max: max.toString() };
+  } catch { return null; }
+}
+
+/** How many NFTs of this collection the wallet already holds (null when it cannot be read). */
+async function readHoldings(rpc, chain, contract, wallet) {
+  if (!rpc || typeof rpc.ethCall !== 'function') return null;
+  try {
+    const value = word(await rpc.ethCall(chain, contract, SUPPLY.encodeFunctionData('balanceOf', [wallet])));
+    return value == null ? null : value.toString();
+  } catch { return null; }
+}
+
 const mintedOutText = (name, minted, max) => `❌ <b>${name} is minted out</b> (${minted} / ${max}).\nThere is nothing left to mint, so I did not schedule it. Send a different collection or contract, or tap Cancel.`;
 
-module.exports = { isMintedOut, readMintedOut, mintedOutText };
+module.exports = { isMintedOut, readMintedOut, readSupply, readHoldings, mintedOutText };

@@ -19,7 +19,8 @@ const { assertSpecKeys, buildFromSpec } = require('../core/mintAdapters');
 const { automationBlocker, hasSigningKey } = require('../core/automationPolicy');
 const { ProviderError } = require('../core/errors');
 const { txUrl, openSeaChainFor } = require('../chains');
-const { isMintedOut, readMintedOut, mintedOutText } = require('../core/supply');
+const { isMintedOut, readMintedOut, readSupply, mintedOutText } = require('../core/supply');
+const { normalizeStages, describeStages, supplyLine } = require('../core/dropStages');
 const { UserError, esc, shortAddr, parseEth, formatWei, parseWhen, utc, looksLikeSecret } = require('../util/format');
 const { gasCap } = require('../core/gasPolicy');
 const { feeFields } = require('../core/feePolicy');
@@ -64,7 +65,7 @@ const inspectionIntro = (disc) => {
   return `<b>Contract inspection</b>\nCollection: <b>${esc(disc.name || 'Unknown')}</b> ${disc.symbol ? `<code>${esc(disc.symbol)}</code>` : ''}\nStandard: ${disc.standards?.erc721 ? 'ERC-721' : disc.standards?.erc1155 ? 'ERC-1155' : 'unconfirmed'}${supply}${proxy}\nVerified ABI: ${disc.verifiedAbi ? 'yes' : 'not available'}\nMint protocol: ${esc(disc.protocol || 'unknown')}\n\n`;
 };
 // Everything chosen after the contract; cleared when the user goes back to the method list.
-const METHOD_FIELDS = ['preset', 'mintSpec', 'quantity', 'priceWei', 'seaDrop', 'thirdwebPhase', 'openSeaDrop', 'osSlug', 'osFeeBps', 'osSuggestedPriceWei', 'osCandidates', 'adapter', 'triggerMode', 'when', 'launchAt', 'endAt', 'wallets'];
+const METHOD_FIELDS = ['preset', 'mintSpec', 'quantity', 'priceWei', 'seaDrop', 'thirdwebPhase', 'openSeaDrop', 'osSlug', 'osFeeBps', 'osStages', 'osStageText', 'osSuggestedPriceWei', 'osCandidates', 'adapter', 'triggerMode', 'when', 'launchAt', 'endAt', 'wallets'];
 /** Wizard keyboard: the step's own buttons, then Back (when there is a previous step) and Cancel. */
 const nav = (state, rows = []) => kb([...rows, [...(BACK_TO[state] ? [{ text: '‹ Back', callback_data: `wz:b:${state}` }] : []), { text: 'Cancel', callback_data: 'wz:x' }]]);
 const timePicks = (withNow, zoneName, zoneButton) => [
@@ -547,7 +548,7 @@ function createBotHandlers(ctx) {
     const picks = [1, 2, 3, 5, 10].filter((n) => n <= max);
     const rows = [picks.map((n) => ({ text: String(n), callback_data: `osq:${n}` }))];
     return wiz(chatId,
-      `<b>${esc(d.openSeaDrop.collection_name || d.osSlug)}</b> · ${esc(chainName(d.chain))}\nContract: <code>${shortAddr(d.contract)}</code>\n\nHow many NFTs per wallet? Choose a button or type a number (1–${max}).`,
+      `<b>${esc(d.openSeaDrop.collection_name || d.osSlug)}</b> · ${esc(chainName(d.chain))}\nContract: <code>${shortAddr(d.contract)}</code>\n\n${d.osStageText ? `${d.osStageText}\n\n` : ''}How many NFTs per wallet? Choose a button or type a number (1–${max}).`,
       nav('sched.osQty', rows)
     );
   }
@@ -605,6 +606,10 @@ function createBotHandlers(ctx) {
         active_stage: drop.active_stage,
         next_stage: drop.next_stage
       };
+      // Show what is being scheduled against: stage timeline and how much supply is left.
+      const stages = normalizeStages(drop);
+      d.osStages = stages.map(({ label, type, start, end }) => ({ label, type, start, end }));
+      d.osStageText = [describeStages(stages, now(), { esc, formatWei: (wei) => formatWei(BigInt(wei)) }), supplyLine(await readSupply(rpc, d.chain, contract))].filter(Boolean).join('\n\n');
       return askOpenSeaQuantity(chatId, d);
     } catch (e) {
       return warn(chatId, adapterErrorText(e));
@@ -719,9 +724,19 @@ function createBotHandlers(ctx) {
     await wiz(chatId, p.usesQuantity ? 'Price <b>per NFT</b> in ETH (e.g. <code>0.01</code>, or <code>0</code> for free mints):' : 'Total mint price in ETH (e.g. <code>0.01</code>, or <code>0</code> if free):', nav('sched.price'));
   }
 
+  // Upcoming OpenSea stages become one-tap start times, so people schedule for the stage their wallet is on.
+  function stageStartRows(d) {
+    const rows = [];
+    (d.osStages || []).forEach((stage, i) => {
+      if (stage.start > now() && rows.length < 3) rows.push([{ text: `Start of ${String(stage.label).slice(0, 26)} (${new Date(stage.start * 1000).toISOString().slice(11, 16)} UTC)`, callback_data: `mode:stage:${i}` }]);
+    });
+    return rows;
+  }
+
   async function askTriggerMode(chatId, d) {
     setState(db, chatId, 'sched.mode', d, now());
     await wiz(chatId, '<b>When should MintPilot mint?</b>\n\n<b>At a set time</b> — MintPilot signs and sends the mint at the time you choose.\n<b>As soon as it opens</b> — MintPilot waits for the mint to open, keeps retrying while it is closed, and sends it the moment it works.', nav('sched.mode', [
+      ...stageStartRows(d),
       [{ text: 'At a set time', callback_data: 'mode:manual' }],
       [{ text: 'As soon as it opens', callback_data: 'mode:launch' }]
     ]));
@@ -1043,6 +1058,13 @@ function createBotHandlers(ctx) {
       if (!['+10m', '+1h', '+6h', 'tom', 'now'].includes(pick) || (pick === 'now' && st.state !== 'sched.launchAt')) return;
       const ts = pick === 'now' ? now() : pick === 'tom' ? tomorrow18(tzOf(from.id)) : parseWhen(pick, now());
       return st.state === 'sched.launchAt' ? applyLaunchAt(chatId, from, d, ts) : applyWhen(chatId, from, d, ts);
+    }
+    if (st.state === 'sched.mode' && data.startsWith('mode:stage:')) {
+      const stage = (d.osStages || [])[Number(data.slice('mode:stage:'.length))];
+      if (!stage || stage.start <= now()) return;
+      d.triggerMode = 'manual';
+      d.when = stage.start;
+      return afterWhen(chatId, from, d);
     }
     if (st.state === 'sched.mode' && data.startsWith('mode:')) {
       const mode = data.slice(5);
